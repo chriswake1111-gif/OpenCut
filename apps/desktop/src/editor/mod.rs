@@ -119,12 +119,13 @@ impl EditorCore {
             return;
         }
 
-        // Prevent double loading by checking cache
+        // Prevent double loading by inserting a placeholder cache entry upfront
         {
-            let cache = self.audio_cache.lock().unwrap();
+            let mut cache = self.audio_cache.lock().unwrap();
             if cache.contains_key(&path) {
                 return;
             }
+            cache.insert(path.clone(), std::sync::Arc::new(Vec::new()));
         }
 
         let cache = self.audio_cache.clone();

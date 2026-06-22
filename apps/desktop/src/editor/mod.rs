@@ -140,8 +140,7 @@ impl EditorCore {
                         .await;
 
                     if let Some(data) = samples {
-                        let mut lock = cache.lock().unwrap();
-                        lock.insert(path, std::sync::Arc::new(data));
+                        cache.lock().unwrap().insert(path, std::sync::Arc::new(data));
 
                         // Notify UI that audio data is ready
                         let _ = this.update(&mut cx, |_, cx| {

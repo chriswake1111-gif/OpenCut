@@ -1,10 +1,10 @@
-use gpui::{*, InteractiveElement};
 use crate::editor::EditorCore;
-use crate::ui::titlebar::Titlebar;
 use crate::ui::media_library::MediaLibrary;
 use crate::ui::player::Player;
-use crate::ui::timeline::Timeline;
 use crate::ui::properties_panel::PropertiesPanel;
+use crate::ui::timeline::Timeline;
+use crate::ui::titlebar::Titlebar;
+use gpui::{InteractiveElement, *};
 use std::path::PathBuf;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -25,9 +25,19 @@ pub enum ExportState {
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum DragMode {
-    TrimStart { clip_id: String, initial_start: f64, initial_duration: f64 },
-    TrimEnd { clip_id: String, initial_duration: f64 },
-    Move { clip_id: String, initial_start: f64 },
+    TrimStart {
+        clip_id: String,
+        initial_start: f64,
+        initial_duration: f64,
+    },
+    TrimEnd {
+        clip_id: String,
+        initial_duration: f64,
+    },
+    Move {
+        clip_id: String,
+        initial_start: f64,
+    },
 }
 
 #[derive(Clone, Debug)]
@@ -91,7 +101,10 @@ impl RightTab {
 fn hash_str(s: &str) -> usize {
     let mut hash = 5381usize;
     for c in s.bytes() {
-        hash = hash.wrapping_shl(5).wrapping_add(hash).wrapping_add(c as usize);
+        hash = hash
+            .wrapping_shl(5)
+            .wrapping_add(hash)
+            .wrapping_add(c as usize);
     }
     hash
 }
@@ -110,44 +123,18 @@ pub struct Workspace {
     pub ripple_enabled: bool,
     pub zoom_level: f32,
     pub transcribing_state: Option<String>,
+    pub ffmpeg_missing: bool,
 }
 
 impl Workspace {
     pub fn new(core: Entity<EditorCore>, cx: &mut Context<Self>) -> Self {
         cx.observe(&core, |_, _, cx: &mut Context<Self>| {
             cx.notify();
-        }).detach();
+        })
+        .detach();
 
-        // Dynamically insert mock subtitle clip on Workspace load
-        core.update(cx, |core, _| {
-            use crate::editor::Clip;
-            // Only insert if it doesn't already exist (to prevent duplicates)
-            if !core.timeline.tracks[0].clips.iter().any(|c| c.id == "clip-text-1") {
-                core.timeline.tracks[0].clips.insert(1, Clip {
-                    id: "clip-text-1".to_string(),
-                    name: "預設字幕".to_string(),
-                    path: "".to_string(),
-                    start: 3.0,
-                    duration: 6.0,
-                    color: "#ec4899".to_string(), // Pink/magenta for text
-                    filter: None,
-                    transition: None,
-                    scale: Some(1.0),
-                    rotation: Some(0.0),
-                    position_x: Some(0.0),
-                    position_y: Some(120.0), // Move it down a bit so it's centered bottom
-                    opacity: Some(1.0),
-                    clip_type: Some("text".to_string()),
-                    text_content: Some("歡迎使用 OpenCut 本地剪輯器！".to_string()),
-                    font_size: Some(28.0),
-                    text_color: Some("#ffffff".to_string()),
-                    volume: None,
-                    fade_in: None,
-                    fade_out: None,
-                    blend_mode: None,
-                });
-            }
-        });
+        let ffmpeg_missing = !crate::editor::system_check::check_ffmpeg_available()
+            || !crate::editor::system_check::check_ffprobe_available();
 
         let focus_handle = cx.focus_handle();
 
@@ -165,10 +152,16 @@ impl Workspace {
             ripple_enabled: false,
             zoom_level: 1.0,
             transcribing_state: None,
+            ffmpeg_missing,
         }
     }
 
-    fn apply_effect(&mut self, filter: Option<String>, transition: Option<String>, cx: &mut Context<Self>) {
+    fn apply_effect(
+        &mut self,
+        filter: Option<String>,
+        transition: Option<String>,
+        cx: &mut Context<Self>,
+    ) {
         if let Some(ref selected_id) = self.selected_clip_id {
             let core = self.core.clone();
             let selected_id = selected_id.clone();
@@ -184,8 +177,12 @@ impl Workspace {
                     }
                 }
 
-                let new_filter = filter.map(|f| if f == "none" { None } else { Some(f) }).unwrap_or(old_filter.clone());
-                let new_transition = transition.map(|t| if t == "none" { None } else { Some(t) }).unwrap_or(old_transition.clone());
+                let new_filter = filter
+                    .map(|f| if f == "none" { None } else { Some(f) })
+                    .unwrap_or(old_filter.clone());
+                let new_transition = transition
+                    .map(|t| if t == "none" { None } else { Some(t) })
+                    .unwrap_or(old_transition.clone());
 
                 let cmd = crate::editor::ApplyEffectCommand::new(
                     selected_id,
@@ -223,11 +220,24 @@ impl Workspace {
             .child(self.render_left_tab_btn(LeftTab::Filters, "🎛", cx))
     }
 
-    fn render_left_tab_btn(&self, tab: LeftTab, label: &'static str, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render_left_tab_btn(
+        &self,
+        tab: LeftTab,
+        label: &'static str,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
         let is_active = self.active_left_tab == tab;
-        let bg_color = if is_active { rgb(0x242427) } else { rgb(0x111112) };
-        let border_color = if is_active { rgb(0x8b5cf6) } else { rgb(0x111112) };
-        
+        let bg_color = if is_active {
+            rgb(0x242427)
+        } else {
+            rgb(0x111112)
+        };
+        let border_color = if is_active {
+            rgb(0x8b5cf6)
+        } else {
+            rgb(0x111112)
+        };
+
         div()
             .id(("left-tab-btn", tab.index()))
             .w_full()
@@ -247,8 +257,12 @@ impl Workspace {
             .child(
                 div()
                     .text_lg()
-                    .text_color(if is_active { rgb(0xffffff) } else { rgb(0x8e8e93) })
-                    .child(label)
+                    .text_color(if is_active {
+                        rgb(0xffffff)
+                    } else {
+                        rgb(0x8e8e93)
+                    })
+                    .child(label),
             )
     }
 
@@ -263,7 +277,7 @@ impl Workspace {
                         .text_sm()
                         .font_weight(FontWeight::BOLD)
                         .text_color(rgb(0xffffff))
-                        .child(title)
+                        .child(title),
                 )
         };
 
@@ -277,88 +291,124 @@ impl Workspace {
             .flex_col();
 
         match self.active_left_tab {
-            LeftTab::Assets => {
-                container.child(MediaLibrary::new(self.core.clone()).render(cx))
-            }
-            LeftTab::Audio => {
-                container
-                    .child(panel_header("音訊庫 (Audio Library)"))
-                    .child(
-                        div()
-                            .id("audio-scroll")
-                            .flex_1()
-                            .p_3()
-                            .flex()
-                            .flex_col()
-                            .gap_2()
-                            .overflow_y_scroll()
-                            .child(self.render_sfx_card("叮咚提示音", "2.0 秒", "dingdong.mp3", cx))
-                            .child(self.render_sfx_card("相機快門聲", "1.5 秒", "shutter.mp3", cx))
-                            .child(self.render_sfx_card("雨聲特效音", "10.0 秒", "rain.mp3", cx))
-                            .child(self.render_sfx_card("日常Vlog輕音樂", "30.0 秒", "vlog_bgm.mp3", cx))
-                    )
-            }
-            LeftTab::Text => {
-                container
-                    .child(panel_header("文字與字幕 (Text & Subtitles)"))
-                    .child(
-                        div()
-                            .id("text-scroll")
-                            .flex_1()
-                            .p_3()
-                            .flex()
-                            .flex_col()
-                            .gap_2()
-                            .overflow_y_scroll()
-                            .child(self.render_text_tpl_card("📄 預設字幕", "一般字幕樣式", "預設字幕內容", 28.0, "#ec4899", cx))
-                            .child(self.render_text_tpl_card("🎬 片頭大標題", "大字體粗體樣式", "片頭大標題", 42.0, "#ec4899", cx))
-                            .child(self.render_text_tpl_card("🏷 精緻浮水印", "半透明版權標記", "Copyright @ OpenCut", 18.0, "#ec4899", cx))
-                    )
-            }
-            LeftTab::Stickers => {
-                container
-                    .child(panel_header("貼圖 (Stickers - Mock)"))
-                    .child(
-                        div()
-                            .flex_1()
-                            .p_4()
-                            .text_xs()
-                            .text_color(rgb(0x8e8e93))
-                            .child("點擊匯入貼圖庫（目前無貼圖）")
-                    )
-            }
-            LeftTab::Effects => {
-                container
-                    .child(panel_header("動態貼圖特效 (Effects)"))
-                    .child(
-                        div()
-                            .id("effects-scroll")
-                            .flex_1()
-                            .p_3()
-                            .flex()
-                            .flex_col()
-                            .gap_2()
-                            .overflow_y_scroll()
-                            .child(self.render_effect_tpl_card("落葉飄落特效", "10 秒", "test_leaves.mp4", cx))
-                            .child(self.render_effect_tpl_card("閃亮星星特效", "10 秒", "test_stars.mp4", cx))
-                    )
-            }
-            LeftTab::Transitions => {
-                container
-                    .child(panel_header("轉場特效 (Transitions)"))
-                    .child(
-                        div()
-                            .id("transitions-scroll")
-                            .flex_1()
-                            .p_3()
-                            .flex()
-                            .flex_col()
-                            .gap_2()
-                            .overflow_y_scroll()
-                            .child(self.render_action_card("無轉場", "清除轉場設定", Some("none".to_string()), None, cx))
-                            .child(self.render_action_card("淡入淡出", "套用淡入淡出轉場", Some("fade".to_string()), None, cx))
-                    )
-            }
+            LeftTab::Assets => container.child(MediaLibrary::new(self.core.clone()).render(cx)),
+            LeftTab::Audio => container
+                .child(panel_header("音訊庫 (Audio Library)"))
+                .child(
+                    div()
+                        .id("audio-scroll")
+                        .flex_1()
+                        .p_3()
+                        .flex()
+                        .flex_col()
+                        .gap_2()
+                        .overflow_y_scroll()
+                        .child(self.render_sfx_card("叮咚提示音", "2.0 秒", "dingdong.mp3", cx))
+                        .child(self.render_sfx_card("相機快門聲", "1.5 秒", "shutter.mp3", cx))
+                        .child(self.render_sfx_card("雨聲特效音", "10.0 秒", "rain.mp3", cx))
+                        .child(self.render_sfx_card(
+                            "日常Vlog輕音樂",
+                            "30.0 秒",
+                            "vlog_bgm.mp3",
+                            cx,
+                        )),
+                ),
+            LeftTab::Text => container
+                .child(panel_header("文字與字幕 (Text & Subtitles)"))
+                .child(
+                    div()
+                        .id("text-scroll")
+                        .flex_1()
+                        .p_3()
+                        .flex()
+                        .flex_col()
+                        .gap_2()
+                        .overflow_y_scroll()
+                        .child(self.render_text_tpl_card(
+                            "📄 預設字幕",
+                            "一般字幕樣式",
+                            "預設字幕內容",
+                            28.0,
+                            "#ec4899",
+                            cx,
+                        ))
+                        .child(self.render_text_tpl_card(
+                            "🎬 片頭大標題",
+                            "大字體粗體樣式",
+                            "片頭大標題",
+                            42.0,
+                            "#ec4899",
+                            cx,
+                        ))
+                        .child(self.render_text_tpl_card(
+                            "🏷 精緻浮水印",
+                            "半透明版權標記",
+                            "Copyright @ OpenCut",
+                            18.0,
+                            "#ec4899",
+                            cx,
+                        )),
+                ),
+            LeftTab::Stickers => container
+                .child(panel_header("貼圖 (Stickers - Mock)"))
+                .child(
+                    div()
+                        .flex_1()
+                        .p_4()
+                        .text_xs()
+                        .text_color(rgb(0x8e8e93))
+                        .child("點擊匯入貼圖庫（目前無貼圖）"),
+                ),
+            LeftTab::Effects => container
+                .child(panel_header("動態貼圖特效 (Effects)"))
+                .child(
+                    div()
+                        .id("effects-scroll")
+                        .flex_1()
+                        .p_3()
+                        .flex()
+                        .flex_col()
+                        .gap_2()
+                        .overflow_y_scroll()
+                        .child(self.render_effect_tpl_card(
+                            "落葉飄落特效",
+                            "10 秒",
+                            "test_leaves.mp4",
+                            cx,
+                        ))
+                        .child(self.render_effect_tpl_card(
+                            "閃亮星星特效",
+                            "10 秒",
+                            "test_stars.mp4",
+                            cx,
+                        )),
+                ),
+            LeftTab::Transitions => container
+                .child(panel_header("轉場特效 (Transitions)"))
+                .child(
+                    div()
+                        .id("transitions-scroll")
+                        .flex_1()
+                        .p_3()
+                        .flex()
+                        .flex_col()
+                        .gap_2()
+                        .overflow_y_scroll()
+                        .child(self.render_action_card(
+                            "無轉場",
+                            "清除轉場設定",
+                            Some("none".to_string()),
+                            None,
+                            cx,
+                        ))
+                        .child(self.render_action_card(
+                            "淡入淡出",
+                            "套用淡入淡出轉場",
+                            Some("fade".to_string()),
+                            None,
+                            cx,
+                        )),
+                ),
             LeftTab::Captions => {
                 let transcribing = self.transcribing_state.clone();
                 let selected_id = self.selected_clip_id.clone();
@@ -376,7 +426,7 @@ impl Workspace {
                         }
                     }
                 }
-                
+
                 // If no clip selected, find the first clip in the timeline that has a path
                 if target_clip.is_none() {
                     for track in &core.read(cx).timeline.tracks {
@@ -402,13 +452,13 @@ impl Workspace {
                                 .text_sm()
                                 .font_weight(FontWeight::BOLD)
                                 .text_color(rgb(0xa78bfa))
-                                .child(status_str.clone())
+                                .child(status_str.clone()),
                         )
                         .child(
                             div()
                                 .text_xs()
                                 .text_color(rgb(0x8e8e93))
-                                .child("本地 Whisper 辨識中，請稍候...")
+                                .child("本地 Whisper 辨識中，請稍候..."),
                         )
                 } else if let Some(clip) = target_clip {
                     // Action State
@@ -570,13 +620,12 @@ impl Workspace {
                             div()
                                 .text_xs()
                                 .text_color(rgb(0xf43f5e))
-                                .child("未發現任何可辨識的媒體。")
+                                .child("未發現任何可辨識的媒體。"),
                         )
                         .child(
-                            div()
-                                .text_xs()
-                                .text_color(rgb(0x8e8e93))
-                                .child("請在時間軸上點選要辨識的影片或音訊剪輯，或先匯入素材檔案。")
+                            div().text_xs().text_color(rgb(0x8e8e93)).child(
+                                "請在時間軸上點選要辨識的影片或音訊剪輯，或先匯入素材檔案。",
+                            ),
                         )
                 };
 
@@ -584,28 +633,54 @@ impl Workspace {
                     .child(panel_header("自動語音辨識字幕 (Local ASR)"))
                     .child(content)
             }
-            LeftTab::Filters => {
-                container
-                    .child(panel_header("濾鏡 (Filters)"))
-                    .child(
-                        div()
-                            .id("filters-scroll")
-                            .flex_1()
-                            .p_3()
-                            .flex()
-                            .flex_col()
-                            .gap_2()
-                            .overflow_y_scroll()
-                            .child(self.render_action_card("無濾鏡", "清除濾鏡設定", None, Some("none".to_string()), cx))
-                            .child(self.render_action_card("黑白濾鏡", "套用黑白效果", None, Some("grayscale".to_string()), cx))
-                            .child(self.render_action_card("明亮濾鏡", "提高亮度", None, Some("brighten".to_string()), cx))
-                            .child(self.render_action_card("高對比濾鏡", "增加對比度", None, Some("contrast".to_string()), cx))
-                    )
-            }
+            LeftTab::Filters => container.child(panel_header("濾鏡 (Filters)")).child(
+                div()
+                    .id("filters-scroll")
+                    .flex_1()
+                    .p_3()
+                    .flex()
+                    .flex_col()
+                    .gap_2()
+                    .overflow_y_scroll()
+                    .child(self.render_action_card(
+                        "無濾鏡",
+                        "清除濾鏡設定",
+                        None,
+                        Some("none".to_string()),
+                        cx,
+                    ))
+                    .child(self.render_action_card(
+                        "黑白濾鏡",
+                        "套用黑白效果",
+                        None,
+                        Some("grayscale".to_string()),
+                        cx,
+                    ))
+                    .child(self.render_action_card(
+                        "明亮濾鏡",
+                        "提高亮度",
+                        None,
+                        Some("brighten".to_string()),
+                        cx,
+                    ))
+                    .child(self.render_action_card(
+                        "高對比濾鏡",
+                        "增加對比度",
+                        None,
+                        Some("contrast".to_string()),
+                        cx,
+                    )),
+            ),
         }
     }
 
-    fn render_sfx_card(&self, name: &'static str, dur: &'static str, filename: &'static str, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render_sfx_card(
+        &self,
+        name: &'static str,
+        dur: &'static str,
+        filename: &'static str,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
         let core = self.core.clone();
         div()
             .p_3()
@@ -626,14 +701,9 @@ impl Workspace {
                             .text_xs()
                             .font_weight(FontWeight::SEMIBOLD)
                             .text_color(rgb(0xffffff))
-                            .child(name)
+                            .child(name),
                     )
-                    .child(
-                        div()
-                            .text_xs()
-                            .text_color(rgb(0x8e8e93))
-                            .child(dur)
-                    )
+                    .child(div().text_xs().text_color(rgb(0x8e8e93)).child(dur)),
             )
             .child(
                 div()
@@ -650,8 +720,20 @@ impl Workspace {
                             let current_time = core.read(cx).playback.current_time;
                             let is_bgm = name.contains("音樂");
                             let track_idx = if is_bgm { 4 } else { 3 };
-                            let color = if is_bgm { "#3b82f6".to_string() } else { "#10b981".to_string() };
-                            let duration_sec = if name.contains("叮咚") { 2.0 } else if name.contains("快門") { 1.5 } else if name.contains("雨聲") { 10.0 } else { 30.0 };
+                            let color = if is_bgm {
+                                "#3b82f6".to_string()
+                            } else {
+                                "#10b981".to_string()
+                            };
+                            let duration_sec = if name.contains("叮咚") {
+                                2.0
+                            } else if name.contains("快門") {
+                                1.5
+                            } else if name.contains("雨聲") {
+                                10.0
+                            } else {
+                                30.0
+                            };
                             let _ = core.update(cx, |core, cx| {
                                 core.execute_command(
                                     Box::new(crate::editor::AddClipCommand::new(
@@ -672,12 +754,20 @@ impl Workspace {
                             .text_xs()
                             .font_weight(FontWeight::BOLD)
                             .text_color(rgb(0xffffff))
-                            .child("+ 新增")
-                    )
+                            .child("+ 新增"),
+                    ),
             )
     }
 
-    fn render_text_tpl_card(&self, name: &'static str, desc: &'static str, content: &'static str, font_size: f64, color: &'static str, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render_text_tpl_card(
+        &self,
+        name: &'static str,
+        desc: &'static str,
+        content: &'static str,
+        font_size: f64,
+        color: &'static str,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
         let core = self.core.clone();
         div()
             .p_3()
@@ -698,14 +788,9 @@ impl Workspace {
                             .text_xs()
                             .font_weight(FontWeight::SEMIBOLD)
                             .text_color(rgb(0xffffff))
-                            .child(name)
+                            .child(name),
                     )
-                    .child(
-                        div()
-                            .text_xs()
-                            .text_color(rgb(0x8e8e93))
-                            .child(desc)
-                    )
+                    .child(div().text_xs().text_color(rgb(0x8e8e93)).child(desc)),
             )
             .child(
                 div()
@@ -723,7 +808,10 @@ impl Workspace {
                             let _ = core.update(cx, |core, cx| {
                                 core.execute_command(
                                     Box::new(crate::editor::AddTextClipCommand::new(
-                                        name.replace("📄 ", "").replace("🎬 ", "").replace("🏷 ", "").to_string(),
+                                        name.replace("📄 ", "")
+                                            .replace("🎬 ", "")
+                                            .replace("🏷 ", "")
+                                            .to_string(),
                                         content.to_string(),
                                         current_time,
                                         5.0,
@@ -741,12 +829,18 @@ impl Workspace {
                             .text_xs()
                             .font_weight(FontWeight::BOLD)
                             .text_color(rgb(0xffffff))
-                            .child("+ 新增")
-                    )
+                            .child("+ 新增"),
+                    ),
             )
     }
 
-    fn render_effect_tpl_card(&self, name: &'static str, desc: &'static str, filename: &'static str, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render_effect_tpl_card(
+        &self,
+        name: &'static str,
+        desc: &'static str,
+        filename: &'static str,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
         let core = self.core.clone();
         div()
             .p_3()
@@ -767,14 +861,9 @@ impl Workspace {
                             .text_xs()
                             .font_weight(FontWeight::SEMIBOLD)
                             .text_color(rgb(0xffffff))
-                            .child(name)
+                            .child(name),
                     )
-                    .child(
-                        div()
-                            .text_xs()
-                            .text_color(rgb(0x8e8e93))
-                            .child(desc)
-                    )
+                    .child(div().text_xs().text_color(rgb(0x8e8e93)).child(desc)),
             )
             .child(
                 div()
@@ -809,12 +898,19 @@ impl Workspace {
                             .text_xs()
                             .font_weight(FontWeight::BOLD)
                             .text_color(rgb(0xffffff))
-                            .child("+ 新增")
-                    )
+                            .child("+ 新增"),
+                    ),
             )
     }
 
-    fn render_action_card(&self, name: &'static str, desc: &'static str, transition: Option<String>, filter: Option<String>, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render_action_card(
+        &self,
+        name: &'static str,
+        desc: &'static str,
+        transition: Option<String>,
+        filter: Option<String>,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
         div()
             .p_3()
             .bg(rgb(0x242427))
@@ -834,14 +930,9 @@ impl Workspace {
                             .text_xs()
                             .font_weight(FontWeight::SEMIBOLD)
                             .text_color(rgb(0xffffff))
-                            .child(name)
+                            .child(name),
                     )
-                    .child(
-                        div()
-                            .text_xs()
-                            .text_color(rgb(0x8e8e93))
-                            .child(desc)
-                    )
+                    .child(div().text_xs().text_color(rgb(0x8e8e93)).child(desc)),
             )
             .child(
                 div()
@@ -864,8 +955,8 @@ impl Workspace {
                             .text_xs()
                             .font_weight(FontWeight::BOLD)
                             .text_color(rgb(0xffffff))
-                            .child("+ 套用")
-                    )
+                            .child("+ 套用"),
+                    ),
             )
     }
 
@@ -913,11 +1004,24 @@ impl Workspace {
         }
     }
 
-    fn render_right_tab_btn(&self, tab: RightTab, label: &'static str, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render_right_tab_btn(
+        &self,
+        tab: RightTab,
+        label: &'static str,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
         let is_active = self.active_right_tab == tab;
-        let bg_color = if is_active { rgb(0x242427) } else { rgb(0x111112) };
-        let border_color = if is_active { rgb(0x8b5cf6) } else { rgb(0x111112) };
-        
+        let bg_color = if is_active {
+            rgb(0x242427)
+        } else {
+            rgb(0x111112)
+        };
+        let border_color = if is_active {
+            rgb(0x8b5cf6)
+        } else {
+            rgb(0x111112)
+        };
+
         div()
             .id(("right-tab-btn", tab.index()))
             .w_full()
@@ -937,8 +1041,12 @@ impl Workspace {
             .child(
                 div()
                     .text_lg()
-                    .text_color(if is_active { rgb(0xffffff) } else { rgb(0x8e8e93) })
-                    .child(label)
+                    .text_color(if is_active {
+                        rgb(0xffffff)
+                    } else {
+                        rgb(0x8e8e93)
+                    })
+                    .child(label),
             )
     }
 
@@ -947,36 +1055,38 @@ impl Workspace {
         let core = self.core.clone();
 
         let btn_style = |id: &'static str, label: &'static str, enabled: bool| {
-            let color = if enabled { rgb(0xffffff) } else { rgb(0x4e4e52) };
+            let color = if enabled {
+                rgb(0xffffff)
+            } else {
+                rgb(0x4e4e52)
+            };
             div()
                 .id(id)
                 .px_2()
                 .py_1()
                 .rounded(px(4.))
-                .bg(if enabled { rgb(0x242427) } else { rgb(0x161618) })
+                .bg(if enabled {
+                    rgb(0x242427)
+                } else {
+                    rgb(0x161618)
+                })
                 .hover(move |s| if enabled { s.bg(rgb(0x2f2f33)) } else { s })
                 .cursor_pointer()
                 .flex()
                 .items_center()
                 .justify_center()
-                .child(
-                    div()
-                        .text_xs()
-                        .text_color(color)
-                        .child(label)
-                )
+                .child(div().text_xs().text_color(color).child(label))
         };
 
-        let split_btn = btn_style("tb-split", "✂ 分割", true)
-            .on_click(cx.listener({
-                let core = core.clone();
-                move |_, _, _, cx| {
-                    let _ = core.update(cx, |core, cx| core.split_clip_at_playhead(cx));
-                }
-            }));
+        let split_btn = btn_style("tb-split", "✂ 分割", true).on_click(cx.listener({
+            let core = core.clone();
+            move |_, _, _, cx| {
+                let _ = core.update(cx, |core, cx| core.split_clip_at_playhead(cx));
+            }
+        }));
 
-        let split_left_btn = btn_style("tb-split-left", "⇠ 剪左", has_selection)
-            .on_click(cx.listener({
+        let split_left_btn =
+            btn_style("tb-split-left", "⇠ 剪左", has_selection).on_click(cx.listener({
                 let core = core.clone();
                 move |this, _, _, cx| {
                     if let Some(ref sel_id) = this.selected_clip_id {
@@ -1003,8 +1113,8 @@ impl Workspace {
                 }
             }));
 
-        let split_right_btn = btn_style("tb-split-right", "剪右 ⇢", has_selection)
-            .on_click(cx.listener({
+        let split_right_btn =
+            btn_style("tb-split-right", "剪右 ⇢", has_selection).on_click(cx.listener({
                 let core = core.clone();
                 move |this, _, _, cx| {
                     if let Some(ref sel_id) = this.selected_clip_id {
@@ -1023,7 +1133,11 @@ impl Workspace {
                                 core.split_clip_at_playhead(cx);
                                 let mut new_clip_id = None;
                                 for track in &core.timeline.tracks {
-                                    if let Some(clip) = track.clips.iter().find(|c| (c.start - playhead).abs() < 0.01) {
+                                    if let Some(clip) = track
+                                        .clips
+                                        .iter()
+                                        .find(|c| (c.start - playhead).abs() < 0.01)
+                                    {
                                         new_clip_id = Some(clip.id.clone());
                                         break;
                                     }
@@ -1040,8 +1154,8 @@ impl Workspace {
                 }
             }));
 
-        let duplicate_btn = btn_style("tb-duplicate", "📋 複製", has_selection)
-            .on_click(cx.listener({
+        let duplicate_btn =
+            btn_style("tb-duplicate", "📋 複製", has_selection).on_click(cx.listener({
                 let core = core.clone();
                 move |this, _, _, cx| {
                     if let Some(ref sel_id) = this.selected_clip_id {
@@ -1085,23 +1199,30 @@ impl Workspace {
                 }
             }));
 
-        let delete_btn = btn_style("tb-delete", "🗑 刪除", has_selection)
-            .on_click(cx.listener({
-                let core = core.clone();
-                move |this, _, _, cx| {
-                    if let Some(ref sel_id) = this.selected_clip_id {
-                        let _ = core.update(cx, |core, cx| {
-                            let cmd = crate::editor::DeleteClipCommand::new(sel_id.clone());
-                            core.execute_command(Box::new(cmd), cx);
-                        });
-                        this.selected_clip_id = None;
-                        cx.notify();
-                    }
+        let delete_btn = btn_style("tb-delete", "🗑 刪除", has_selection).on_click(cx.listener({
+            let core = core.clone();
+            move |this, _, _, cx| {
+                if let Some(ref sel_id) = this.selected_clip_id {
+                    let _ = core.update(cx, |core, cx| {
+                        let cmd = crate::editor::DeleteClipCommand::new(sel_id.clone());
+                        core.execute_command(Box::new(cmd), cx);
+                    });
+                    this.selected_clip_id = None;
+                    cx.notify();
                 }
-            }));
+            }
+        }));
 
-        let snap_bg = if self.snapping_enabled { rgb(0x8b5cf6) } else { rgb(0x242427) };
-        let snap_color = if self.snapping_enabled { rgb(0xffffff) } else { rgb(0x8e8e93) };
+        let snap_bg = if self.snapping_enabled {
+            rgb(0x8b5cf6)
+        } else {
+            rgb(0x242427)
+        };
+        let snap_color = if self.snapping_enabled {
+            rgb(0xffffff)
+        } else {
+            rgb(0x8e8e93)
+        };
         let snap_btn = div()
             .id("tb-snap")
             .px_2()
@@ -1114,15 +1235,18 @@ impl Workspace {
                 this.snapping_enabled = !this.snapping_enabled;
                 cx.notify();
             }))
-            .child(
-                div()
-                    .text_xs()
-                    .text_color(snap_color)
-                    .child("🧲 磁吸對齊")
-            );
+            .child(div().text_xs().text_color(snap_color).child("🧲 磁吸對齊"));
 
-        let ripple_bg = if self.ripple_enabled { rgb(0x8b5cf6) } else { rgb(0x242427) };
-        let ripple_color = if self.ripple_enabled { rgb(0xffffff) } else { rgb(0x8e8e93) };
+        let ripple_bg = if self.ripple_enabled {
+            rgb(0x8b5cf6)
+        } else {
+            rgb(0x242427)
+        };
+        let ripple_color = if self.ripple_enabled {
+            rgb(0xffffff)
+        } else {
+            rgb(0x8e8e93)
+        };
         let ripple_btn = div()
             .id("tb-ripple")
             .px_2()
@@ -1139,7 +1263,7 @@ impl Workspace {
                 div()
                     .text_xs()
                     .text_color(ripple_color)
-                    .child("🌊 漣漪編輯")
+                    .child("🌊 漣漪編輯"),
             );
 
         let zoom_out = div()
@@ -1158,12 +1282,7 @@ impl Workspace {
                 this.zoom_level = (this.zoom_level - 0.25).max(1.0);
                 cx.notify();
             }))
-            .child(
-                div()
-                    .text_xs()
-                    .text_color(rgb(0xffffff))
-                    .child("🔍⁻")
-            );
+            .child(div().text_xs().text_color(rgb(0xffffff)).child("🔍⁻"));
 
         let zoom_in = div()
             .id("tb-zoom-in")
@@ -1181,12 +1300,7 @@ impl Workspace {
                 this.zoom_level = (this.zoom_level + 0.25).min(4.0);
                 cx.notify();
             }))
-            .child(
-                div()
-                    .text_xs()
-                    .text_color(rgb(0xffffff))
-                    .child("🔍⁺")
-            );
+            .child(div().text_xs().text_color(rgb(0xffffff)).child("🔍⁺"));
 
         let slider_progress = (self.zoom_level - 1.0) / 3.0;
         let slider_width = 80.0;
@@ -1205,7 +1319,7 @@ impl Workspace {
                     .left_0()
                     .h_full()
                     .bg(rgb(0x8b5cf6))
-                    .w(relative(slider_progress))
+                    .w(relative(slider_progress)),
             )
             .child(
                 div()
@@ -1216,7 +1330,7 @@ impl Workspace {
                     .rounded_full()
                     .bg(rgb(0xffffff))
                     .border(px(1.))
-                    .border_color(rgb(0x8b5cf6))
+                    .border_color(rgb(0x8b5cf6)),
             );
 
         div()
@@ -1239,7 +1353,7 @@ impl Workspace {
                     .child(split_left_btn)
                     .child(split_right_btn)
                     .child(duplicate_btn)
-                    .child(delete_btn)
+                    .child(delete_btn),
             )
             .child(
                 div()
@@ -1256,8 +1370,8 @@ impl Workspace {
                             .gap_1_5()
                             .child(zoom_out)
                             .child(zoom_slider)
-                            .child(zoom_in)
-                    )
+                            .child(zoom_in),
+                    ),
             )
     }
 }
@@ -1272,6 +1386,28 @@ impl Render for Workspace {
 
         let active_menu = self.active_menu;
         let export_state = self.export_state.clone();
+
+        let ffmpeg_banner = if self.ffmpeg_missing {
+            Some(
+                div()
+                    .id("ffmpeg-missing-banner")
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .bg(rgb(0xd97706)) // Amber-600 黃橘色
+                    .py_2()
+                    .px_4()
+                    .child(
+                        div()
+                            .text_xs()
+                            .text_color(rgb(0xffffff))
+                            .font_weight(FontWeight::BOLD)
+                            .child("⚠️ 系統未檢測到 FFmpeg 或 FFprobe。影片匯出功能將無法正常運作。請安裝 FFmpeg 並將其加入 PATH。")
+                    )
+            )
+        } else {
+            None
+        };
 
         // Dropdown menus absolute overlay
         let file_menu = if active_menu == Some(MainMenu::File) {
@@ -1292,7 +1428,8 @@ impl Render for Workspace {
                     .child(menu_option("開啟專案 (Ctrl+O)", crate::OpenProject))
                     .child(menu_option("儲存專案 (Ctrl+S)", crate::SaveProject))
                     .child(menu_option("匯入媒體 (Ctrl+I)", crate::ImportClip))
-                    .child(menu_option("匯出影片 (Ctrl+E)", crate::ExportVideo))
+                    .child(menu_option("載入範例素材 (Ctrl+D)", crate::LoadDemo))
+                    .child(menu_option("匯出影片 (Ctrl+E)", crate::ExportVideo)),
             )
         } else {
             None
@@ -1316,34 +1453,30 @@ impl Render for Workspace {
                     .child(menu_option("重做 (Ctrl+Y)", crate::Redo))
                     .child(menu_option("分割剪輯 (Ctrl+K)", crate::Split))
                     .child(menu_option("刪除選取剪輯 (Delete)", crate::DeleteClip))
-                    .child(
-                        div().h(px(1.)).bg(rgb(0x242427)).my_1()
-                    )
+                    .child(div().h(px(1.)).bg(rgb(0x242427)).my_1())
                     .child(
                         div()
                             .px_3()
                             .py_1()
                             .text_xs()
                             .text_color(rgb(0x8e8e93))
-                            .child("套用色彩濾鏡：")
+                            .child("套用色彩濾鏡："),
                     )
                     .child(menu_option("  ↳ 無濾鏡", crate::ApplyNoneFilter))
                     .child(menu_option("  ↳ 黑白濾鏡", crate::ApplyGrayscaleFilter))
                     .child(menu_option("  ↳ 明亮濾鏡", crate::ApplyBrightenFilter))
                     .child(menu_option("  ↳ 高對比濾鏡", crate::ApplyContrastFilter))
-                    .child(
-                        div().h(px(1.)).bg(rgb(0x242427)).my_1()
-                    )
+                    .child(div().h(px(1.)).bg(rgb(0x242427)).my_1())
                     .child(
                         div()
                             .px_3()
                             .py_1()
                             .text_xs()
                             .text_color(rgb(0x8e8e93))
-                            .child("套用剪輯轉場：")
+                            .child("套用剪輯轉場："),
                     )
                     .child(menu_option("  ↳ 無轉場", crate::ApplyNoneTransition))
-                    .child(menu_option("  ↳ 淡入淡出轉場", crate::ApplyFadeTransition))
+                    .child(menu_option("  ↳ 淡入淡出轉場", crate::ApplyFadeTransition)),
             )
         } else {
             None
@@ -1579,6 +1712,11 @@ impl Render for Workspace {
                 let _ = this.core.update(cx, |core, cx| core.new_project(cx));
                 cx.notify();
             }))
+            .on_action(cx.listener(|this, _: &crate::LoadDemo, _, cx| {
+                this.selected_clip_id = None;
+                let _ = this.core.update(cx, |core, cx| core.load_demo(cx));
+                cx.notify();
+            }))
             .on_action(cx.listener(|this, _: &crate::TogglePlay, _, cx| {
                 let _ = this.core.update(cx, |core, cx| {
                     if core.playback.is_playing {
@@ -1764,7 +1902,7 @@ impl Render for Workspace {
                     let window_width: f32 = window.bounds().size.width.into();
                     let timeline_width = (window_width - 72.0).max(100.0);
                     let delta_x = f32::from(event.position.x) - drag.start_mouse_x;
-                    
+
                     let duration = this.core.read(cx).playback.duration;
                     let delta_seconds = (delta_x / timeline_width) as f64 * duration;
 
@@ -1775,7 +1913,7 @@ impl Render for Workspace {
                         let mut snap_targets = Vec::new();
                         // Add playhead
                         snap_targets.push(core.playback.current_time);
-                        
+
                         // Extract target clip_id from drag mode
                         let current_drag_clip_id = match &drag.mode {
                             DragMode::Move { clip_id, .. } => Some(clip_id.clone()),
@@ -1816,7 +1954,7 @@ impl Render for Workspace {
                                     if let Some(clip) = track.clips.iter_mut().find(|c| c.id == *clip_id) {
                                         let target_start = (initial_start + delta_seconds).max(0.0);
                                         let target_end = target_start + clip.duration;
-                                        
+
                                         // Check snap for start or end
                                         if let Some(snap_start) = find_snap(target_start) {
                                             clip.start = snap_start;
@@ -1836,7 +1974,7 @@ impl Render for Workspace {
                                 for track in &mut core.timeline.tracks {
                                     if let Some(clip) = track.clips.iter_mut().find(|c| c.id == *clip_id) {
                                         let target_start = (initial_start + delta_seconds).clamp(0.0, initial_start + initial_duration - 0.5);
-                                        
+
                                         let final_start = if let Some(snap_start) = find_snap(target_start) {
                                             let clamped = snap_start.clamp(0.0, initial_start + initial_duration - 0.5);
                                             snapped_time = Some(clamped);
@@ -1844,7 +1982,7 @@ impl Render for Workspace {
                                         } else {
                                             target_start
                                         };
-                                        
+
                                         clip.start = final_start;
                                         clip.duration = initial_duration - (final_start - initial_start);
                                         core.update_frame(cx);
@@ -1857,7 +1995,7 @@ impl Render for Workspace {
                                     if let Some(clip) = track.clips.iter_mut().find(|c| c.id == *clip_id) {
                                         let target_duration = (initial_duration + delta_seconds).max(0.5);
                                         let target_end = clip.start + target_duration;
-                                        
+
                                         if let Some(snap_end) = find_snap(target_end) {
                                             let final_duration = (snap_end - clip.start).max(0.5);
                                             clip.duration = final_duration;
@@ -1883,7 +2021,7 @@ impl Render for Workspace {
                     let window_width: f32 = window.bounds().size.width.into();
                     let timeline_width = (window_width - 72.0).max(100.0);
                     let delta_x = f32::from(event.position.x) - drag.start_mouse_x;
-                    
+
                     let duration = this.core.read(cx).playback.duration;
                     let delta_seconds = (delta_x / timeline_width) as f64 * duration;
 
@@ -1941,7 +2079,7 @@ impl Render for Workspace {
 
                                         // Reset to initial to allow execute_command to record the change
                                         clip.start = *initial_start;
-                                        
+
                                         let cmd = crate::editor::EditClipCommand::new(
                                             clip_id.clone(),
                                             *initial_start,
@@ -1970,7 +2108,7 @@ impl Render for Workspace {
                                         // Reset to initial values
                                         clip.start = *initial_start;
                                         clip.duration = *initial_duration;
-                                        
+
                                         let cmd = crate::editor::EditClipCommand::new(
                                             clip_id.clone(),
                                             *initial_start,
@@ -1997,7 +2135,7 @@ impl Render for Workspace {
 
                                         // Reset to initial values
                                         clip.duration = *initial_duration;
-                                        
+
                                         let cmd = crate::editor::EditClipCommand::new(
                                             clip_id.clone(),
                                             clip.start,
@@ -2012,7 +2150,7 @@ impl Render for Workspace {
                             }
                         }
                     });
-                    
+
                     this.snapped_time = None;
                     cx.notify();
                 }
@@ -2022,6 +2160,7 @@ impl Render for Workspace {
             .flex()
             .flex_col()
             .child(Titlebar::new(active_menu).render(cx))
+            .children(ffmpeg_banner)
             .child(
                 div()
                     .flex_1()

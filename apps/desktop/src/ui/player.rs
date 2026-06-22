@@ -1,5 +1,5 @@
-use gpui::{*, InteractiveElement};
 use crate::editor::EditorCore;
+use gpui::{InteractiveElement, *};
 
 pub struct Player {
     core: Entity<EditorCore>,
@@ -57,7 +57,7 @@ impl Player {
                     .w(px(6.))
                     .h(px(height_val as f32))
                     .bg(bar_color)
-                    .rounded_full()
+                    .rounded_full(),
             );
         }
 
@@ -276,12 +276,7 @@ where
         .items_center()
         .justify_center()
         .on_click(move |_, _, cx| action(cx))
-        .child(
-            div()
-                .text_sm()
-                .text_color(rgb(0xc5c5c7))
-                .child(icon)
-        )
+        .child(div().text_sm().text_color(rgb(0xc5c5c7)).child(icon))
 }
 
 fn format_time(seconds: f64) -> String {

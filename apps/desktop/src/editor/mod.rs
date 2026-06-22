@@ -1,14 +1,21 @@
-pub mod playback;
-pub mod timeline;
 pub mod command;
 pub mod decoder;
+pub mod export;
+pub mod playback;
 pub mod project;
+pub mod system_check;
+pub mod timeline;
 
+pub use command::{
+    AddClipCommand, AddTextClipCommand, ApplyEffectCommand, Command, CommandHistory,
+    DeleteClipCommand, EditClipAudioCommand, EditClipBlendModeCommand, EditClipCommand,
+    EditClipTextCommand, EditClipTransformCommand, SplitClipCommand,
+};
+pub use export::{ExportClip, ExportPlan, FfmpegCommandBuilder};
 use gpui::Context;
-pub use playback::{PlaybackManager, AudioHost};
-pub use timeline::{TimelineManager, Clip};
-pub use command::{Command, CommandHistory, AddClipCommand, EditClipCommand, SplitClipCommand, ApplyEffectCommand, EditClipTransformCommand, EditClipTextCommand, EditClipAudioCommand, EditClipBlendModeCommand, DeleteClipCommand, AddTextClipCommand};
+pub use playback::{AudioHost, PlaybackManager};
 pub use project::ProjectFile;
+pub use timeline::{Clip, TimelineManager};
 
 pub struct EditorCore {
     pub playback: PlaybackManager,
@@ -20,7 +27,9 @@ pub struct EditorCore {
     last_update_time: std::time::Instant,
     pub frame_cache: std::sync::Arc<decoder::FrameCache>,
     active_decodes: std::sync::Arc<std::sync::Mutex<std::collections::HashSet<(String, u32)>>>,
-    pub audio_cache: std::sync::Arc<std::sync::Mutex<std::collections::HashMap<String, std::sync::Arc<Vec<f32>>>>>,
+    pub audio_cache: std::sync::Arc<
+        std::sync::Mutex<std::collections::HashMap<String, std::sync::Arc<Vec<f32>>>>,
+    >,
     pub audio_host: Option<AudioHost>,
 }
 
@@ -35,36 +44,74 @@ impl EditorCore {
             audio_waveforms: std::collections::HashMap::new(),
             last_update_time: std::time::Instant::now(),
             frame_cache: std::sync::Arc::new(decoder::FrameCache::new(30)),
-            active_decodes: std::sync::Arc::new(std::sync::Mutex::new(std::collections::HashSet::new())),
-            audio_cache: std::sync::Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
+            active_decodes: std::sync::Arc::new(std::sync::Mutex::new(
+                std::collections::HashSet::new(),
+            )),
+            audio_cache: std::sync::Arc::new(std::sync::Mutex::new(
+                std::collections::HashMap::new(),
+            )),
             audio_host: None,
         }
+    }
+
+    #[allow(dead_code)]
+    pub fn demo() -> Self {
+        Self {
+            playback: PlaybackManager::new(),
+            timeline: TimelineManager::demo(),
+            history: CommandHistory::new(),
+            current_frame: None,
+            video_metadata: std::collections::HashMap::new(),
+            audio_waveforms: std::collections::HashMap::new(),
+            last_update_time: std::time::Instant::now(),
+            frame_cache: std::sync::Arc::new(decoder::FrameCache::new(30)),
+            active_decodes: std::sync::Arc::new(std::sync::Mutex::new(
+                std::collections::HashSet::new(),
+            )),
+            audio_cache: std::sync::Arc::new(std::sync::Mutex::new(
+                std::collections::HashMap::new(),
+            )),
+            audio_host: None,
+        }
+    }
+
+    pub fn load_demo(&mut self, cx: &mut Context<Self>) {
+        self.timeline = TimelineManager::demo();
+        self.playback.duration = 60.0;
+        self.playback.current_time = 0.0;
+        self.playback.is_playing = false;
+        self.history = CommandHistory::new();
+        cx.notify();
     }
 
     pub fn load_audio_waveform(&mut self, path: String, cx: &mut Context<Self>) {
         if self.audio_waveforms.contains_key(&path) {
             return;
         }
-        
+
         // Prevent double loading by inserting an empty vector
         self.audio_waveforms.insert(path.clone(), Vec::new());
-        
-        cx.spawn(move |this: gpui::WeakEntity<Self>, cx: &mut gpui::AsyncApp| {
-            let mut cx = cx.clone();
-            async move {
-                let path_clone = path.clone();
-                let samples = cx.background_executor().spawn(async move {
-                    decoder::extract_audio_waveform(&path_clone)
-                }).await;
-                
-                if let Some(data) = samples {
-                    let _ = this.update(&mut cx, |this, cx| {
-                        this.audio_waveforms.insert(path, data);
-                        cx.notify();
-                    });
+
+        cx.spawn(
+            move |this: gpui::WeakEntity<Self>, cx: &mut gpui::AsyncApp| {
+                let mut cx = cx.clone();
+                async move {
+                    let path_clone = path.clone();
+                    let samples = cx
+                        .background_executor()
+                        .spawn(async move { decoder::extract_audio_waveform(&path_clone) })
+                        .await;
+
+                    if let Some(data) = samples {
+                        let _ = this.update(&mut cx, |this, cx| {
+                            this.audio_waveforms.insert(path, data);
+                            cx.notify();
+                        });
+                    }
                 }
-            }
-        }).detach();
+            },
+        )
+        .detach();
     }
 
     pub fn load_audio_samples(&mut self, path: String, cx: &mut Context<Self>) {
@@ -81,25 +128,29 @@ impl EditorCore {
         }
 
         let cache = self.audio_cache.clone();
-        cx.spawn(move |this: gpui::WeakEntity<Self>, cx: &mut gpui::AsyncApp| {
-            let mut cx = cx.clone();
-            async move {
-                let path_clone = path.clone();
-                let samples = cx.background_executor().spawn(async move {
-                    decoder::extract_audio_samples(&path_clone)
-                }).await;
+        cx.spawn(
+            move |this: gpui::WeakEntity<Self>, cx: &mut gpui::AsyncApp| {
+                let mut cx = cx.clone();
+                async move {
+                    let path_clone = path.clone();
+                    let samples = cx
+                        .background_executor()
+                        .spawn(async move { decoder::extract_audio_samples(&path_clone) })
+                        .await;
 
-                if let Some(data) = samples {
-                    let mut lock = cache.lock().unwrap();
-                    lock.insert(path, std::sync::Arc::new(data));
-                    
-                    // Notify UI that audio data is ready
-                    let _ = this.update(&mut cx, |_, cx| {
-                        cx.notify();
-                    });
+                    if let Some(data) = samples {
+                        let mut lock = cache.lock().unwrap();
+                        lock.insert(path, std::sync::Arc::new(data));
+
+                        // Notify UI that audio data is ready
+                        let _ = this.update(&mut cx, |_, cx| {
+                            cx.notify();
+                        });
+                    }
                 }
-            }
-        }).detach();
+            },
+        )
+        .detach();
     }
 
     pub fn play(&mut self, cx: &mut Context<Self>) {
@@ -107,8 +158,13 @@ impl EditorCore {
             return;
         }
         self.playback.is_playing = true;
-        self.playback.is_playing_atomic.store(true, std::sync::atomic::Ordering::Relaxed);
-        self.playback.atomic_time_ms.store((self.playback.current_time * 1000.0) as u64, std::sync::atomic::Ordering::Relaxed);
+        self.playback
+            .is_playing_atomic
+            .store(true, std::sync::atomic::Ordering::Relaxed);
+        self.playback.atomic_time_ms.store(
+            (self.playback.current_time * 1000.0) as u64,
+            std::sync::atomic::Ordering::Relaxed,
+        );
         cx.notify();
 
         // Spawn AudioHost for audio mixer playback
@@ -127,45 +183,55 @@ impl EditorCore {
         );
 
         let interval = std::time::Duration::from_millis(16);
-        self.playback.play_task = Some(cx.spawn(move |this: gpui::WeakEntity<Self>, cx: &mut gpui::AsyncApp| {
-            let mut cx = cx.clone();
-            async move {
-                loop {
-                    cx.background_executor().timer(interval).await;
-                    let ended: anyhow::Result<bool> = this.update(&mut cx, |this: &mut Self, cx: &mut Context<Self>| {
-                        if !this.playback.is_playing {
-                            return true;
+        self.playback.play_task = Some(cx.spawn(
+            move |this: gpui::WeakEntity<Self>, cx: &mut gpui::AsyncApp| {
+                let mut cx = cx.clone();
+                async move {
+                    loop {
+                        cx.background_executor().timer(interval).await;
+                        let ended: anyhow::Result<bool> =
+                            this.update(&mut cx, |this: &mut Self, cx: &mut Context<Self>| {
+                                if !this.playback.is_playing {
+                                    return true;
+                                }
+
+                                // Sync current playhead time with atomic audio thread time
+                                let audio_ms = this
+                                    .playback
+                                    .atomic_time_ms
+                                    .load(std::sync::atomic::Ordering::Relaxed);
+                                this.playback.current_time = audio_ms as f64 / 1000.0;
+
+                                if this.playback.current_time >= this.playback.duration {
+                                    this.playback.current_time = this.playback.duration;
+                                    this.playback.is_playing = false;
+                                    this.playback
+                                        .is_playing_atomic
+                                        .store(false, std::sync::atomic::Ordering::Relaxed);
+                                    this.audio_host = None;
+                                    this.update_frame(cx);
+                                    cx.notify();
+                                    return true;
+                                }
+                                this.update_frame(cx);
+                                this.prefetch_future_frames(cx);
+                                cx.notify();
+                                false
+                            });
+                        if ended.is_err() || ended.unwrap() {
+                            break;
                         }
-                        
-                        // Sync current playhead time with atomic audio thread time
-                        let audio_ms = this.playback.atomic_time_ms.load(std::sync::atomic::Ordering::Relaxed);
-                        this.playback.current_time = audio_ms as f64 / 1000.0;
-                        
-                        if this.playback.current_time >= this.playback.duration {
-                            this.playback.current_time = this.playback.duration;
-                            this.playback.is_playing = false;
-                            this.playback.is_playing_atomic.store(false, std::sync::atomic::Ordering::Relaxed);
-                            this.audio_host = None;
-                            this.update_frame(cx);
-                            cx.notify();
-                            return true;
-                        }
-                        this.update_frame(cx);
-                        this.prefetch_future_frames(cx);
-                        cx.notify();
-                        false
-                    });
-                    if ended.is_err() || ended.unwrap() {
-                        break;
                     }
                 }
-            }
-        }));
+            },
+        ));
     }
 
     pub fn pause(&mut self, cx: &mut Context<Self>) {
         self.playback.is_playing = false;
-        self.playback.is_playing_atomic.store(false, std::sync::atomic::Ordering::Relaxed);
+        self.playback
+            .is_playing_atomic
+            .store(false, std::sync::atomic::Ordering::Relaxed);
         self.playback.play_task = None;
         self.audio_host = None; // Stop audio cpal stream
         cx.notify();
@@ -173,7 +239,10 @@ impl EditorCore {
 
     pub fn seek(&mut self, time: f64, cx: &mut Context<Self>) {
         self.playback.current_time = time.clamp(0.0, self.playback.duration);
-        self.playback.atomic_time_ms.store((self.playback.current_time * 1000.0) as u64, std::sync::atomic::Ordering::Relaxed);
+        self.playback.atomic_time_ms.store(
+            (self.playback.current_time * 1000.0) as u64,
+            std::sync::atomic::Ordering::Relaxed,
+        );
         self.update_frame(cx);
         cx.notify();
     }
@@ -209,7 +278,7 @@ impl EditorCore {
 
     pub fn update_frame(&mut self, cx: &mut Context<Self>) {
         let current_time = self.playback.current_time;
-        
+
         // 1. 收集所有軌道（限視訊軌 0 與 1）在 current_time 的 active Clips
         let mut active_clips = Vec::new();
         for track_idx in 0..=1 {
@@ -259,11 +328,18 @@ impl EditorCore {
             };
 
             if let Some((width, height, _)) = meta {
-                let scale_height = (((height as f64 * (scale_width as f64 / width as f64)) as u32) / 2) * 2;
+                let scale_height =
+                    (((height as f64 * (scale_width as f64 / width as f64)) as u32) / 2) * 2;
                 let scale_height = scale_height.max(2);
 
                 if let Some(cached_raw_img) = self.frame_cache.get(&path, relative_time) {
-                    frames_to_blend.push((clip.clone(), cached_raw_img, scale_height, width, height));
+                    frames_to_blend.push((
+                        clip.clone(),
+                        cached_raw_img,
+                        scale_height,
+                        width,
+                        height,
+                    ));
                 } else {
                     all_cached = false;
                     self.trigger_async_decode(
@@ -291,7 +367,13 @@ impl EditorCore {
 
     fn apply_multi_track_blending(
         &mut self,
-        frames: Vec<(timeline::Clip, std::sync::Arc<image::RgbaImage>, u32, u32, u32)>,
+        frames: Vec<(
+            timeline::Clip,
+            std::sync::Arc<image::RgbaImage>,
+            u32,
+            u32,
+            u32,
+        )>,
         scale_width: u32,
         cx: &mut Context<Self>,
     ) {
@@ -301,7 +383,7 @@ impl EditorCore {
 
         // 以底層（第一軌）影片的高度作為合成畫布的高度
         let scale_height = frames[0].2;
-        
+
         let mut main_canvas = image::ImageBuffer::new(scale_width, scale_height);
         for pixel in main_canvas.pixels_mut() {
             *pixel = image::Rgba([0, 0, 0, 0]);
@@ -361,7 +443,9 @@ impl EditorCore {
             match filter.as_str() {
                 "grayscale" => {
                     for pixel in buffer.pixels_mut() {
-                        let gray = (0.299 * pixel[0] as f64 + 0.587 * pixel[1] as f64 + 0.114 * pixel[2] as f64) as u8;
+                        let gray = (0.299 * pixel[0] as f64
+                            + 0.587 * pixel[1] as f64
+                            + 0.114 * pixel[2] as f64) as u8;
                         pixel[0] = gray;
                         pixel[1] = gray;
                         pixel[2] = gray;
@@ -377,9 +461,12 @@ impl EditorCore {
                 "contrast" => {
                     let factor = 1.25;
                     for pixel in buffer.pixels_mut() {
-                        pixel[0] = (((pixel[0] as f64 - 128.0) * factor) + 128.0).clamp(0.0, 255.0) as u8;
-                        pixel[1] = (((pixel[1] as f64 - 128.0) * factor) + 128.0).clamp(0.0, 255.0) as u8;
-                        pixel[2] = (((pixel[2] as f64 - 128.0) * factor) + 128.0).clamp(0.0, 255.0) as u8;
+                        pixel[0] =
+                            (((pixel[0] as f64 - 128.0) * factor) + 128.0).clamp(0.0, 255.0) as u8;
+                        pixel[1] =
+                            (((pixel[1] as f64 - 128.0) * factor) + 128.0).clamp(0.0, 255.0) as u8;
+                        pixel[2] =
+                            (((pixel[2] as f64 - 128.0) * factor) + 128.0).clamp(0.0, 255.0) as u8;
                     }
                 }
                 _ => {}
@@ -427,7 +514,13 @@ impl EditorCore {
         }
     }
 
-    fn blend_pixel(&self, bg: &mut image::Rgba<u8>, fg: &image::Rgba<u8>, blend_mode: &str, clip_opacity: f32) {
+    fn blend_pixel(
+        &self,
+        bg: &mut image::Rgba<u8>,
+        fg: &image::Rgba<u8>,
+        blend_mode: &str,
+        clip_opacity: f32,
+    ) {
         let fg_alpha = (fg[3] as f32 / 255.0) * clip_opacity;
         if fg_alpha <= 0.0 {
             return;
@@ -444,16 +537,12 @@ impl EditorCore {
         let b_bg = bg[2] as f32 / 255.0;
 
         let (r_blend, g_blend, b_blend) = match blend_mode {
-            "multiply" => {
-                (r_fg * r_bg, g_fg * g_bg, b_fg * b_bg)
-            }
-            "screen" => {
-                (
-                    r_fg + r_bg - r_fg * r_bg,
-                    g_fg + g_bg - g_fg * g_bg,
-                    b_fg + b_bg - b_fg * b_bg,
-                )
-            }
+            "multiply" => (r_fg * r_bg, g_fg * g_bg, b_fg * b_bg),
+            "screen" => (
+                r_fg + r_bg - r_fg * r_bg,
+                g_fg + g_bg - g_fg * g_bg,
+                b_fg + b_bg - b_fg * b_bg,
+            ),
             "overlay" => {
                 let overlay_ch = |cb: f32, cs: f32| -> f32 {
                     if cb < 0.5 {
@@ -462,11 +551,13 @@ impl EditorCore {
                         1.0 - 2.0 * (1.0 - cs) * (1.0 - cb)
                     }
                 };
-                (overlay_ch(r_bg, r_fg), overlay_ch(g_bg, g_fg), overlay_ch(b_bg, b_fg))
+                (
+                    overlay_ch(r_bg, r_fg),
+                    overlay_ch(g_bg, g_fg),
+                    overlay_ch(b_bg, b_fg),
+                )
             }
-            _ => {
-                (r_fg, g_fg, b_fg)
-            }
+            _ => (r_fg, g_fg, b_fg),
         };
 
         let out_alpha = fg_alpha + bg_alpha * (1.0 - fg_alpha);
@@ -501,7 +592,7 @@ impl EditorCore {
         cx: &mut Context<Self>,
     ) {
         let key = (path.clone(), (relative_time / 0.016).round() as u32);
-        
+
         {
             let mut active = self.active_decodes.lock().unwrap();
             if active.contains(&key) {
@@ -513,52 +604,75 @@ impl EditorCore {
         let cache = self.frame_cache.clone();
         let active_decodes = self.active_decodes.clone();
 
-        cx.spawn(move |this: gpui::WeakEntity<Self>, cx: &mut gpui::AsyncApp| {
-            let mut cx = cx.clone();
-            let path = path.clone();
-            let relative_time = relative_time;
-            async move {
-                let path_clone = path.clone();
-                let raw_buffer: Option<image::RgbaImage> = cx.background_executor().spawn(async move {
-                    let is_img = is_image_path(&path_clone);
-                    let bgra_bytes = if is_img {
-                        decoder::extract_static_image(&path_clone, scale_width, scale_height)
-                    } else {
-                        decoder::extract_video_frame(&path_clone, relative_time, scale_width, scale_height)
-                    };
+        cx.spawn(
+            move |this: gpui::WeakEntity<Self>, cx: &mut gpui::AsyncApp| {
+                let mut cx = cx.clone();
+                let path = path.clone();
+                let relative_time = relative_time;
+                async move {
+                    let path_clone = path.clone();
+                    let raw_buffer: Option<image::RgbaImage> = cx
+                        .background_executor()
+                        .spawn(async move {
+                            let is_img = is_image_path(&path_clone);
+                            let bgra_bytes = if is_img {
+                                decoder::extract_static_image(
+                                    &path_clone,
+                                    scale_width,
+                                    scale_height,
+                                )
+                            } else {
+                                decoder::extract_video_frame(
+                                    &path_clone,
+                                    relative_time,
+                                    scale_width,
+                                    scale_height,
+                                )
+                            };
 
-                    if let Some(bytes) = bgra_bytes {
-                        image::ImageBuffer::<image::Rgba<u8>, Vec<u8>>::from_raw(scale_width, scale_height, bytes)
-                    } else {
-                        None
+                            if let Some(bytes) = bgra_bytes {
+                                image::ImageBuffer::<image::Rgba<u8>, Vec<u8>>::from_raw(
+                                    scale_width,
+                                    scale_height,
+                                    bytes,
+                                )
+                            } else {
+                                None
+                            }
+                        })
+                        .await;
+
+                    {
+                        let mut active = active_decodes.lock().unwrap();
+                        active.remove(&key);
                     }
-                }).await;
 
-                {
-                    let mut active = active_decodes.lock().unwrap();
-                    active.remove(&key);
+                    if let Some(buf) = raw_buffer {
+                        let buf_arc = std::sync::Arc::new(buf);
+
+                        cache.insert(&path, relative_time, buf_arc.clone());
+
+                        let _ = this.update(&mut cx, |this: &mut Self, cx: &mut Context<Self>| {
+                            let current_time = this.playback.current_time;
+                            if (current_time - target_time).abs() < 0.05 {
+                                this.update_frame(cx);
+                            }
+                        });
+                    }
                 }
-
-                if let Some(buf) = raw_buffer {
-                    let buf_arc = std::sync::Arc::new(buf);
-                    
-                    cache.insert(&path, relative_time, buf_arc.clone());
-
-                    let _ = this.update(&mut cx, |this: &mut Self, cx: &mut Context<Self>| {
-                        let current_time = this.playback.current_time;
-                        if (current_time - target_time).abs() < 0.05 {
-                            this.update_frame(cx);
-                        }
-                    });
-                }
-            }
-        }).detach();
+            },
+        )
+        .detach();
     }
 
     fn prefetch_future_frames(&self, cx: &mut Context<Self>) {
         let current_time = self.playback.current_time;
         for track_idx in 0..=1 {
-            if let Some(clip) = self.timeline.find_clip_at_time(track_idx, current_time).cloned() {
+            if let Some(clip) = self
+                .timeline
+                .find_clip_at_time(track_idx, current_time)
+                .cloned()
+            {
                 if !clip.path.is_empty() {
                     for i in 1..=5 {
                         let prefetch_time = current_time + (i as f64) * 0.016 * self.playback.speed;
@@ -568,11 +682,14 @@ impl EditorCore {
 
                         let path = clip.path.clone();
                         let relative_time = prefetch_time - clip.start;
-                        
+
                         let meta = self.video_metadata.get(&path).cloned();
                         if let Some((width, height, _)) = meta {
                             let scale_width = 640u32;
-                            let scale_height = (((height as f64 * (scale_width as f64 / width as f64)) as u32) / 2) * 2;
+                            let scale_height =
+                                (((height as f64 * (scale_width as f64 / width as f64)) as u32)
+                                    / 2)
+                                    * 2;
                             let scale_height = scale_height.max(2);
 
                             if self.frame_cache.get(&path, relative_time).is_none() {
@@ -597,7 +714,7 @@ impl EditorCore {
 
     pub fn split_clip_at_playhead(&mut self, cx: &mut Context<Self>) {
         let playhead = self.playback.current_time;
-        
+
         let mut target_clip = None;
         if !self.timeline.tracks.is_empty() {
             for clip in &self.timeline.tracks[0].clips {
@@ -614,7 +731,7 @@ impl EditorCore {
                 .map(|d| d.as_millis())
                 .unwrap_or(0);
             let new_clip_id = format!("clip-split-{}", timestamp);
-            
+
             let cmd = SplitClipCommand::new(clip.id.clone(), new_clip_id, playhead, clip.duration);
             self.execute_command(Box::new(cmd), cx);
             println!("Split clip at playhead: {}s", playhead);
@@ -626,11 +743,31 @@ impl EditorCore {
     pub fn new_project(&mut self, cx: &mut Context<Self>) {
         use timeline::Track;
         self.timeline.tracks = vec![
-            Track { id: "track-1".to_string(), clips: vec![], volume: Some(1.0) },
-            Track { id: "track-2".to_string(), clips: vec![], volume: Some(1.0) },
-            Track { id: "track-3".to_string(), clips: vec![], volume: Some(1.0) },
-            Track { id: "track-4".to_string(), clips: vec![], volume: Some(1.0) },
-            Track { id: "track-5".to_string(), clips: vec![], volume: Some(1.0) },
+            Track {
+                id: "track-1".to_string(),
+                clips: vec![],
+                volume: Some(1.0),
+            },
+            Track {
+                id: "track-2".to_string(),
+                clips: vec![],
+                volume: Some(1.0),
+            },
+            Track {
+                id: "track-3".to_string(),
+                clips: vec![],
+                volume: Some(1.0),
+            },
+            Track {
+                id: "track-4".to_string(),
+                clips: vec![],
+                volume: Some(1.0),
+            },
+            Track {
+                id: "track-5".to_string(),
+                clips: vec![],
+                volume: Some(1.0),
+            },
         ];
         self.playback.duration = 60.0;
         self.playback.current_time = 0.0;
@@ -654,7 +791,11 @@ impl EditorCore {
         Ok(())
     }
 
-    pub fn load_project(&mut self, path: &std::path::Path, cx: &mut Context<Self>) -> anyhow::Result<()> {
+    pub fn load_project(
+        &mut self,
+        path: &std::path::Path,
+        cx: &mut Context<Self>,
+    ) -> anyhow::Result<()> {
         let file = std::fs::File::open(path)?;
         let proj: ProjectFile = serde_json::from_reader(file)?;
         self.timeline.tracks = proj.tracks;
@@ -678,14 +819,16 @@ impl EditorCore {
         // Collect Track 0 clips
         if self.timeline.tracks.is_empty() || self.timeline.tracks[0].clips.is_empty() {
             let _ = status_updater.update(cx, |workspace, cx| {
-                workspace.export_state = crate::ui::workspace::ExportState::Failed("時間軸上沒有任何剪輯片段。".to_string());
+                workspace.export_state = crate::ui::workspace::ExportState::Failed(
+                    "時間軸上沒有任何剪輯片段。".to_string(),
+                );
                 cx.notify();
             });
             return;
         }
 
         let clips = self.timeline.tracks[0].clips.clone();
-        
+
         // Validate Track 0 paths exist
         for clip in &clips {
             if clip.path.is_empty() || !std::path::Path::new(&clip.path).exists() {
@@ -738,12 +881,15 @@ impl EditorCore {
             }
         }
 
-        let total_duration: f64 = clips.iter().map(|c| c.duration).sum();
         let export_path_buf = export_path.to_path_buf();
         let export_path_for_ffmpeg = export_path_buf.clone();
         let status_updater_for_ffmpeg = status_updater.clone();
-
-        let track_0_vol = self.timeline.tracks.first().and_then(|t| t.volume).unwrap_or(1.0);
+        let track_0_vol = self
+            .timeline
+            .tracks
+            .first()
+            .and_then(|t| t.volume)
+            .unwrap_or(1.0);
 
         // Spawn async background task to run FFmpeg and read progress
         cx.spawn(move |_, cx: &mut gpui::AsyncApp| {
@@ -751,316 +897,125 @@ impl EditorCore {
             async move {
                 let cx_for_ffmpeg = cx.clone();
                 let result = move || -> anyhow::Result<()> {
-                    let mut cmd = std::process::Command::new("ffmpeg");
-                    cmd.arg("-y");
-                    
-                    // Add Track 0 (Video) inputs
+                    // 1. Probe metadata for Track 0 clips in background
+                    let mut export_clips = Vec::new();
                     for clip in &clips {
-                        if is_image_path(&clip.path) {
-                            cmd.arg("-loop").arg("1");
-                            cmd.arg("-t").arg(format!("{:.3}", clip.duration));
-                            cmd.arg("-i").arg(&clip.path);
+                        let has_audio = decoder::has_audio_stream(&clip.path);
+                        let is_image = is_image_path(&clip.path);
+                        let (w, h) = if is_image {
+                            (1920, 1080)
+                        } else if let Some(meta) = decoder::probe_video_metadata(&clip.path) {
+                            (meta.0, meta.1)
                         } else {
-                            cmd.arg("-t").arg(format!("{:.3}", clip.duration));
-                            cmd.arg("-i").arg(&clip.path);
-                        }
+                            (1920, 1080)
+                        };
+                        export_clips.push(ExportClip {
+                            clip: clip.clone(),
+                            has_audio,
+                            width: w,
+                            height: h,
+                            is_image,
+                        });
                     }
 
-                    // Add Track 1 (Overlay Video) inputs
+                    // 2. Probe metadata for Overlay clips in background
+                    let mut export_overlay_clips = Vec::new();
                     for clip in &overlay_clips {
-                        if is_image_path(&clip.path) {
-                            cmd.arg("-loop").arg("1");
-                            cmd.arg("-t").arg(format!("{:.3}", clip.duration));
-                            cmd.arg("-i").arg(&clip.path);
-                        } else {
-                            cmd.arg("-t").arg(format!("{:.3}", clip.duration));
-                            cmd.arg("-i").arg(&clip.path);
-                        }
-                    }
-
-                    // Add Audio inputs
-                    for (clip, _) in &audio_clips {
-                        cmd.arg("-t").arg(format!("{:.3}", clip.duration));
-                        cmd.arg("-i").arg(&clip.path);
-                    }
-
-                    // Create filter graph
-                    let mut filter_complex = String::new();
-                    
-                    // 1. Process each Video input (Track 0)
-                    for (i, clip) in clips.iter().enumerate() {
                         let has_audio = decoder::has_audio_stream(&clip.path);
-                        
-                        // Video filter chain
-                        let mut v_filter_chain = Vec::new();
-                        if let Some(ref filter) = clip.filter {
-                            match filter.as_str() {
-                                "grayscale" => v_filter_chain.push("hue=s=0".to_string()),
-                                "brighten" => v_filter_chain.push("eq=brightness=0.08".to_string()),
-                                "contrast" => v_filter_chain.push("eq=contrast=1.25".to_string()),
-                                _ => {}
-                            }
-                        }
-                        if let Some(ref trans) = clip.transition {
-                            if trans == "fade" && clip.duration > 1.0 {
-                                v_filter_chain.push("fade=t=in:st=0:d=0.5".to_string());
-                                v_filter_chain.push(format!("fade=t=out:st={:.3}:d=0.5", clip.duration - 0.5));
-                            }
-                        }
-                        
-                        // Opacity
-                        let op = clip.opacity.unwrap_or(1.0);
-                        if op < 1.0 {
-                            v_filter_chain.push(format!("format=rgba,colorchannelmixer=aa={:.2}", op));
-                        }
-
-                        // Transform (Scale, Rotate, Position X/Y)
-                        let scale_factor = clip.scale.unwrap_or(1.0);
-                        let rot_deg = clip.rotation.unwrap_or(0.0);
-                        let pos_x = clip.position_x.unwrap_or(0.0);
-                        let pos_y = clip.position_y.unwrap_or(0.0);
-
-                        let has_geom_transform = scale_factor != 1.0 || rot_deg != 0.0 || pos_x != 0.0 || pos_y != 0.0;
-                        if has_geom_transform {
-                            let (orig_w, orig_h) = if let Some(meta) = decoder::probe_video_metadata(&clip.path) {
-                                (meta.0, meta.1)
-                            } else {
-                                (1920, 1080)
-                            };
-
-                            if scale_factor != 1.0 {
-                                v_filter_chain.push(format!("scale=w=iw*{:.2}:h=ih*{:.2}", scale_factor, scale_factor));
-                            }
-                            if rot_deg != 0.0 {
-                                v_filter_chain.push(format!("rotate={:.2}*PI/180:fillcolor=black", rot_deg));
-                            }
-                            v_filter_chain.push(format!(
-                                "pad=w={}:h={}:x=(ow-iw)/2+{:.2}:y=(oh-ih)/2+{:.2}:color=black",
-                                orig_w, orig_h, pos_x, pos_y
-                            ));
-                        }
-
-                        if !v_filter_chain.is_empty() {
-                            filter_complex.push_str(&format!("[{}:v]{}[v_proc_{}];", i, v_filter_chain.join(","), i));
-                        }
-                        
-                        // Audio filter chain / silence generation
-                        if has_audio {
-                            let mut a_filter_chain = Vec::new();
-                            if let Some(ref trans) = clip.transition {
-                                if trans == "fade" && clip.duration > 1.0 {
-                                    a_filter_chain.push("afade=t=in:st=0:d=0.5".to_string());
-                                    a_filter_chain.push(format!("afade=t=out:st={:.3}:d=0.5", clip.duration - 0.5));
-                                }
-                            }
-                            if !a_filter_chain.is_empty() {
-                                filter_complex.push_str(&format!("[{}:a]{}[a_proc_{}];", i, a_filter_chain.join(","), i));
-                            }
+                        let is_image = is_image_path(&clip.path);
+                        let (w, h) = if is_image {
+                            (1920, 1080)
+                        } else if let Some(meta) = decoder::probe_video_metadata(&clip.path) {
+                            (meta.0, meta.1)
                         } else {
-                            // Generate silent audio of the clip's duration
-                            filter_complex.push_str(&format!("anullsrc=r=44100:cl=stereo,atrim=0:{:.3}[a_proc_{}];", clip.duration, i));
-                        }
+                            (1920, 1080)
+                        };
+                        export_overlay_clips.push(ExportClip {
+                            clip: clip.clone(),
+                            has_audio,
+                            width: w,
+                            height: h,
+                            is_image,
+                        });
                     }
 
-                    // 2. Concat processed Video & Audio inputs (Track 0)
-                    for i in 0..clips.len() {
-                        let clip = &clips[i];
+                    // 3. Probe metadata for Audio clips
+                    let mut export_audio_clips = Vec::new();
+                    for (clip, track_vol) in &audio_clips {
                         let has_audio = decoder::has_audio_stream(&clip.path);
-                        
-                        let has_v_proc = clip.filter.is_some()
-                            || (clip.transition.is_some() && clip.duration > 1.0)
-                            || clip.opacity.unwrap_or(1.0) < 1.0
-                            || clip.scale.unwrap_or(1.0) != 1.0
-                            || clip.rotation.unwrap_or(0.0) != 0.0
-                            || clip.position_x.unwrap_or(0.0) != 0.0
-                            || clip.position_y.unwrap_or(0.0) != 0.0;
-
-                        let v_label = if has_v_proc {
-                            format!("[v_proc_{}]", i)
-                        } else {
-                            format!("[{}:v]", i)
-                        };
-                        
-                        let a_label = if !has_audio || (clip.transition.is_some() && clip.duration > 1.0) {
-                            format!("[a_proc_{}]", i)
-                        } else {
-                            format!("[{}:a]", i)
-                        };
-                        
-                        filter_complex.push_str(&format!("{}{}", v_label, a_label));
-                    }
-                    filter_complex.push_str(&format!("concat=n={}:v=1:a=1[v_concat][a_concat];", clips.len()));
-
-                    // Apply main track volume
-                    filter_complex.push_str(&format!("[a_concat]volume={:.2}[a_main_vol]", track_0_vol));
-
-                    // 3. Process Track 1 Overlay inputs
-                    let n = clips.len();
-                    let mut current_bg = "[v_concat]".to_string();
-                    for (j, clip) in overlay_clips.iter().enumerate() {
-                        let idx = n + j;
-                        let mut v_filter_chain = Vec::new();
-                        
-                        if let Some(ref filter) = clip.filter {
-                            match filter.as_str() {
-                                "grayscale" => v_filter_chain.push("hue=s=0".to_string()),
-                                "brighten" => v_filter_chain.push("eq=brightness=0.08".to_string()),
-                                "contrast" => v_filter_chain.push("eq=contrast=1.25".to_string()),
-                                _ => {}
-                            }
-                        }
-                        
-                        if let Some(ref trans) = clip.transition {
-                            if trans == "fade" && clip.duration > 1.0 {
-                                v_filter_chain.push("fade=t=in:st=0:d=0.5".to_string());
-                                v_filter_chain.push(format!("fade=t=out:st={:.3}:d=0.5", clip.duration - 0.5));
-                            }
-                        }
-                        
-                        let op = clip.opacity.unwrap_or(1.0);
-                        if op < 1.0 {
-                            v_filter_chain.push(format!("format=rgba,colorchannelmixer=aa={:.2}", op));
-                        }
-
-                        let scale_factor = clip.scale.unwrap_or(1.0);
-                        let rot_deg = clip.rotation.unwrap_or(0.0);
-                        let pos_x = clip.position_x.unwrap_or(0.0);
-                        let pos_y = clip.position_y.unwrap_or(0.0);
-
-                        let has_geom_transform = scale_factor != 1.0 || rot_deg != 0.0 || pos_x != 0.0 || pos_y != 0.0;
-                        if has_geom_transform {
-                            let (orig_w, orig_h) = if let Some(meta) = decoder::probe_video_metadata(&clip.path) {
-                                (meta.0, meta.1)
-                            } else {
-                                (1920, 1080)
-                            };
-
-                            if scale_factor != 1.0 {
-                                v_filter_chain.push(format!("scale=w=iw*{:.2}:h=ih*{:.2}", scale_factor, scale_factor));
-                            }
-                            if rot_deg != 0.0 {
-                                v_filter_chain.push(format!("rotate={:.2}*PI/180:fillcolor=black", rot_deg));
-                            }
-                            v_filter_chain.push(format!(
-                                "pad=w={}:h={}:x=(ow-iw)/2+{:.2}:y=(oh-ih)/2+{:.2}:color=black@0",
-                                orig_w, orig_h, pos_x, pos_y
-                            ));
-                        }
-
-                        let v_label = if !v_filter_chain.is_empty() {
-                            let label = format!("[v_overlay_proc_{}]", j);
-                            filter_complex.push_str(&format!("[{}:v]{}{};", idx, v_filter_chain.join(","), label));
-                            label
-                        } else {
-                            format!("[{}:v]", idx)
-                        };
-
-                        let next_bg = format!("[v_over_{}]", j);
-                        let start = clip.start;
-                        let end = clip.start + clip.duration;
-                        
-                        if !filter_complex.is_empty() && !filter_complex.ends_with(';') {
-                            filter_complex.push(';');
-                        }
-                        filter_complex.push_str(&format!(
-                            "{}{}overlay=x=0:y=0:enable='between(t,{:.3},{:.3})'{}",
-                            current_bg, v_label, start, end, next_bg
-                        ));
-                        current_bg = next_bg;
-                    }
-
-                    // 4. Process all Audio inputs
-                    let audio_start_idx = n + overlay_clips.len();
-                    for (j, (clip, track_vol)) in audio_clips.iter().enumerate() {
-                        let mut bgm_filter_chain = Vec::new();
-                        if let Some(ref trans) = clip.transition {
-                            if trans == "fade" && clip.duration > 1.0 {
-                                bgm_filter_chain.push("afade=t=in:st=0:d=0.5".to_string());
-                                bgm_filter_chain.push(format!("afade=t=out:st={:.3}:d=0.5", clip.duration - 0.5));
-                            }
-                        }
-                        let combined_vol = (clip.volume.unwrap_or(1.0) as f64) * track_vol;
-                        bgm_filter_chain.push(format!("volume={:.2}", combined_vol));
-                        let delay_ms = (clip.start * 1000.0) as i64;
-                        bgm_filter_chain.push(format!("adelay={}|{}", delay_ms, delay_ms));
-
-                        if !filter_complex.is_empty() && !filter_complex.ends_with(';') {
-                            filter_complex.push(';');
-                        }
-                        filter_complex.push_str(&format!(
-                            "[{}:a]{}[delayed_bgm_{}]",
-                            audio_start_idx + j,
-                            bgm_filter_chain.join(","),
-                            j
+                        export_audio_clips.push((
+                            ExportClip {
+                                clip: clip.clone(),
+                                has_audio,
+                                width: 0,
+                                height: 0,
+                                is_image: false,
+                            },
+                            *track_vol,
                         ));
                     }
 
-                    // 5. Mix all audio tracks
-                    if !audio_clips.is_empty() {
-                        if !filter_complex.is_empty() && !filter_complex.ends_with(';') {
-                            filter_complex.push(';');
-                        }
-                        filter_complex.push_str("[a_main_vol]");
-                        for j in 0..audio_clips.len() {
-                            filter_complex.push_str(&format!("[delayed_bgm_{}]", j));
-                        }
-                        filter_complex.push_str(&format!("amix=inputs={}:duration=first[a_mixed]", 1 + audio_clips.len()));
-                    }
+                    let plan = ExportPlan {
+                        clips: export_clips,
+                        overlay_clips: export_overlay_clips,
+                        audio_clips: export_audio_clips,
+                        track_0_vol,
+                        export_path: export_path_for_ffmpeg,
+                    };
 
-                    cmd.arg("-filter_complex").arg(filter_complex);
-                    cmd.arg("-map").arg(&current_bg);
-                    
-                    if !audio_clips.is_empty() {
-                        cmd.arg("-map").arg("[a_mixed]");
-                    } else {
-                        cmd.arg("-map").arg("[a_main_vol]");
-                    }
-                    cmd.arg(&export_path_for_ffmpeg);
-
-                    cmd.stdout(std::process::Stdio::null());
-                    cmd.stderr(std::process::Stdio::piped());
-
+                    let (mut cmd, total_duration) = FfmpegCommandBuilder::build(&plan);
                     println!("Starting FFmpeg export: {:?}", cmd);
                     let mut child = cmd.spawn()?;
-                    let stderr = child.stderr.take().ok_or_else(|| anyhow::anyhow!("Failed to open stderr of ffmpeg"))?;
+                    let stderr = child
+                        .stderr
+                        .take()
+                        .ok_or_else(|| anyhow::anyhow!("Failed to open stderr of ffmpeg"))?;
 
                     use std::io::{BufRead, BufReader};
                     let reader = BufReader::new(stderr);
+                    let mut last_stderr_lines = std::collections::VecDeque::with_capacity(20);
 
-                    for line_result in reader.lines() {
-                        if let Ok(line) = line_result {
-                            if let Some(pos) = line.find("time=") {
-                                let time_part = &line[pos + 5..];
-                                if time_part.len() >= 11 {
-                                    let hms = &time_part[0..11];
-                                    let parts: Vec<&str> = hms.split(':').collect();
-                                    if parts.len() == 3 {
-                                        if let (Ok(h), Ok(m), Ok(s)) = (
-                                            parts[0].parse::<f64>(),
-                                            parts[1].parse::<f64>(),
-                                            parts[2].parse::<f64>(),
-                                        ) {
-                                            let current_time = h * 3600.0 + m * 60.0 + s;
-                                            let progress = (current_time / total_duration).clamp(0.0, 0.99) as f32;
-                                            
-                                            let updater = status_updater_for_ffmpeg.clone();
-                                            let cx_clone = cx_for_ffmpeg.clone();
-                                            let _ = cx_clone.update(move |cx| {
-                                                let _ = updater.update(cx, |workspace, cx| {
-                                                    workspace.export_state = crate::ui::workspace::ExportState::Exporting { progress };
-                                                    cx.notify();
-                                                });
+                    for line in reader.lines().map_while(Result::ok) {
+                        if let Some(pos) = line.find("time=") {
+                            let time_part = &line[pos + 5..];
+                            if time_part.len() >= 11 {
+                                let hms = &time_part[0..11];
+                                let parts: Vec<&str> = hms.split(':').collect();
+                                if parts.len() == 3 {
+                                    if let (Ok(h), Ok(m), Ok(s)) = (
+                                        parts[0].parse::<f64>(),
+                                        parts[1].parse::<f64>(),
+                                        parts[2].parse::<f64>(),
+                                    ) {
+                                        let current_time = h * 3600.0 + m * 60.0 + s;
+                                        let progress =
+                                            (current_time / total_duration).clamp(0.0, 0.99) as f32;
+
+                                        let updater = status_updater_for_ffmpeg.clone();
+                                        let cx_clone = cx_for_ffmpeg.clone();
+                                        let _ = cx_clone.update(move |cx| {
+                                            let _ = updater.update(cx, |workspace, cx| {
+                                                workspace.export_state =
+                                                    crate::ui::workspace::ExportState::Exporting {
+                                                        progress,
+                                                    };
+                                                cx.notify();
                                             });
-                                        }
+                                        });
                                     }
                                 }
                             }
                         }
+                        if last_stderr_lines.len() >= 20 {
+                            last_stderr_lines.pop_front();
+                        }
+                        last_stderr_lines.push_back(line);
                     }
 
                     let status = child.wait()?;
                     if !status.success() {
-                        anyhow::bail!("FFmpeg export failed");
+                        let err_msg = last_stderr_lines.make_contiguous().join("\n");
+                        anyhow::bail!("FFmpeg export failed:\n{}", err_msg);
                     }
 
                     Ok(())
@@ -1071,17 +1026,23 @@ impl EditorCore {
                     let _ = status_updater.update(cx, |workspace, cx| {
                         match result {
                             Ok(_) => {
-                                workspace.export_state = crate::ui::workspace::ExportState::Success { file_path: export_path_buf };
+                                workspace.export_state =
+                                    crate::ui::workspace::ExportState::Success {
+                                        file_path: export_path_buf,
+                                    };
                             }
                             Err(e) => {
-                                workspace.export_state = crate::ui::workspace::ExportState::Failed(format!("匯出失敗: {}", e));
+                                workspace.export_state = crate::ui::workspace::ExportState::Failed(
+                                    format!("匯出失敗: {}", e),
+                                );
                             }
                         }
                         cx.notify();
                     });
                 });
             }
-        }).detach();
+        })
+        .detach();
     }
 }
 

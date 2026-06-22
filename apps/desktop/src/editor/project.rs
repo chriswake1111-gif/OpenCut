@@ -1,5 +1,5 @@
-use serde::{Serialize, Deserialize};
 use crate::editor::timeline::Track;
+use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct ProjectFile {
@@ -63,7 +63,8 @@ mod tests {
         // Deserialize & Verify
         {
             let file = File::open(&temp_path).expect("Failed to open temp project file");
-            let loaded: ProjectFile = serde_json::from_reader(file).expect("Failed to deserialize project");
+            let loaded: ProjectFile =
+                serde_json::from_reader(file).expect("Failed to deserialize project");
 
             assert_eq!(loaded.version, "1.0");
             assert_eq!(loaded.duration, 60.0);

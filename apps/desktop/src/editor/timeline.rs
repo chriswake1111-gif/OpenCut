@@ -1,4 +1,4 @@
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Clip {
@@ -38,7 +38,30 @@ pub struct TimelineManager {
 
 impl TimelineManager {
     pub fn new() -> Self {
-        // Pre-populate with three tracks and some mock clips for aesthetics
+        let track_1 = Track {
+            id: "track-1".to_string(),
+            clips: vec![],
+            volume: Some(1.0),
+        };
+
+        let track_2 = Track {
+            id: "track-2".to_string(),
+            clips: vec![],
+            volume: Some(1.0),
+        };
+
+        let track_3 = Track {
+            id: "track-3".to_string(),
+            clips: vec![],
+            volume: Some(0.7),
+        };
+
+        Self {
+            tracks: vec![track_1, track_2, track_3],
+        }
+    }
+
+    pub fn demo() -> Self {
         let track_1 = Track {
             id: "track-1".to_string(),
             clips: vec![
@@ -63,6 +86,29 @@ impl TimelineManager {
                     volume: Some(1.0),
                     fade_in: Some(0.0),
                     fade_out: Some(0.0),
+                    blend_mode: None,
+                },
+                Clip {
+                    id: "clip-text-1".to_string(),
+                    name: "預設字幕".to_string(),
+                    path: "".to_string(),
+                    start: 3.0,
+                    duration: 6.0,
+                    color: "#ec4899".to_string(), // Pink/magenta for text
+                    filter: None,
+                    transition: None,
+                    scale: Some(1.0),
+                    rotation: Some(0.0),
+                    position_x: Some(0.0),
+                    position_y: Some(120.0),
+                    opacity: Some(1.0),
+                    clip_type: Some("text".to_string()),
+                    text_content: Some("歡迎使用 OpenCut 本地剪輯器！".to_string()),
+                    font_size: Some(28.0),
+                    text_color: Some("#ffffff".to_string()),
+                    volume: None,
+                    fade_in: None,
+                    fade_out: None,
                     blend_mode: None,
                 },
                 Clip {
@@ -94,61 +140,57 @@ impl TimelineManager {
 
         let track_2 = Track {
             id: "track-2".to_string(),
-            clips: vec![
-                Clip {
-                    id: "clip-overlay".to_string(),
-                    name: "疊加影片.mp4".to_string(),
-                    path: "".to_string(),
-                    start: 5.0,
-                    duration: 6.0,
-                    color: "#f43f5e".to_string(), // Rose
-                    filter: None,
-                    transition: None,
-                    scale: None,
-                    rotation: None,
-                    position_x: None,
-                    position_y: None,
-                    opacity: Some(0.8), // 80% opacity
-                    clip_type: None,
-                    text_content: None,
-                    font_size: None,
-                    text_color: None,
-                    volume: Some(0.0), // Mute overlay track audio
-                    fade_in: Some(0.0),
-                    fade_out: Some(0.0),
-                    blend_mode: Some("screen".to_string()),
-                },
-            ],
+            clips: vec![Clip {
+                id: "clip-overlay".to_string(),
+                name: "疊加影片.mp4".to_string(),
+                path: "".to_string(),
+                start: 5.0,
+                duration: 6.0,
+                color: "#f43f5e".to_string(), // Rose
+                filter: None,
+                transition: None,
+                scale: None,
+                rotation: None,
+                position_x: None,
+                position_y: None,
+                opacity: Some(0.8), // 80% opacity
+                clip_type: None,
+                text_content: None,
+                font_size: None,
+                text_color: None,
+                volume: Some(0.0), // Mute overlay track audio
+                fade_in: Some(0.0),
+                fade_out: Some(0.0),
+                blend_mode: Some("screen".to_string()),
+            }],
             volume: Some(1.0),
         };
 
         let track_3 = Track {
             id: "track-3".to_string(),
-            clips: vec![
-                Clip {
-                    id: "clip-3".to_string(),
-                    name: "背景音樂.mp3".to_string(),
-                    path: "".to_string(),
-                    start: 0.0,
-                    duration: 48.0,
-                    color: "#10b981".to_string(), // Emerald
-                    filter: None,
-                    transition: None,
-                    scale: None,
-                    rotation: None,
-                    position_x: None,
-                    position_y: None,
-                    opacity: None,
-                    clip_type: None,
-                    text_content: None,
-                    font_size: None,
-                    text_color: None,
-                    volume: Some(0.8), // Start at 80% volume
-                    fade_in: Some(2.0),  // 2s fade in
-                    fade_out: Some(3.0), // 3s fade out
-                    blend_mode: None,
-                },
-            ],
+            clips: vec![Clip {
+                id: "clip-3".to_string(),
+                name: "背景音樂.mp3".to_string(),
+                path: "".to_string(),
+                start: 0.0,
+                duration: 48.0,
+                color: "#10b981".to_string(), // Emerald
+                filter: None,
+                transition: None,
+                scale: None,
+                rotation: None,
+                position_x: None,
+                position_y: None,
+                opacity: None,
+                clip_type: None,
+                text_content: None,
+                font_size: None,
+                text_color: None,
+                volume: Some(0.8),   // Start at 80% volume
+                fade_in: Some(2.0),  // 2s fade in
+                fade_out: Some(3.0), // 3s fade out
+                blend_mode: None,
+            }],
             volume: Some(0.7), // Default background music volume slightly lower
         };
 
@@ -157,13 +199,31 @@ impl TimelineManager {
         }
     }
 
+    pub fn sort_track(&mut self, track_index: usize) {
+        if track_index < self.tracks.len() {
+            self.tracks[track_index].clips.sort_by(|a, b| {
+                a.start
+                    .partial_cmp(&b.start)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            });
+        }
+    }
+
     #[allow(dead_code)]
-    pub fn add_clip(&mut self, name: String, path: String, start: f64, duration: f64, color: String, track_index: usize) {
+    pub fn add_clip(
+        &mut self,
+        name: String,
+        path: String,
+        start: f64,
+        duration: f64,
+        color: String,
+        track_index: usize,
+    ) {
         let timestamp = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_millis())
             .unwrap_or(0);
-        
+
         let new_clip = Clip {
             id: format!("clip-{}", timestamp),
             name,
@@ -190,6 +250,7 @@ impl TimelineManager {
 
         if track_index < self.tracks.len() {
             self.tracks[track_index].clips.push(new_clip);
+            self.sort_track(track_index);
         }
     }
 
@@ -198,12 +259,12 @@ impl TimelineManager {
             return None;
         }
         let clips = &self.tracks[track_index].clips;
-        
+
         // Use binary search as the fast path
         match clips.binary_search_by(|c| {
             if time < c.start {
                 std::cmp::Ordering::Greater
-            } else if time > c.start + c.duration {
+            } else if time >= c.start + c.duration {
                 std::cmp::Ordering::Less
             } else {
                 std::cmp::Ordering::Equal
@@ -212,7 +273,9 @@ impl TimelineManager {
             Ok(idx) => Some(&clips[idx]),
             Err(_) => {
                 // Fallback to linear search in case of overlaps or slight unsortedness
-                clips.iter().find(|c| time >= c.start && time <= c.start + c.duration)
+                clips
+                    .iter()
+                    .find(|c| time >= c.start && time < c.start + c.duration)
             }
         }
     }
@@ -283,5 +346,67 @@ mod tests {
         assert!(manager.find_clip_at_time(0, 6.0).is_none());
         assert_eq!(manager.find_clip_at_time(0, 12.0).unwrap().id, "2");
     }
-}
 
+    #[test]
+    fn test_timeline_boundary_half_open() {
+        let manager = TimelineManager {
+            tracks: vec![Track {
+                id: "track-1".to_string(),
+                clips: vec![
+                    Clip {
+                        id: "1".to_string(),
+                        name: "clip1".to_string(),
+                        path: "".to_string(),
+                        start: 0.0,
+                        duration: 5.0,
+                        color: "".to_string(),
+                        filter: None,
+                        transition: None,
+                        scale: None,
+                        rotation: None,
+                        position_x: None,
+                        position_y: None,
+                        opacity: None,
+                        clip_type: None,
+                        text_content: None,
+                        font_size: None,
+                        text_color: None,
+                        volume: None,
+                        fade_in: None,
+                        fade_out: None,
+                        blend_mode: None,
+                    },
+                    Clip {
+                        id: "2".to_string(),
+                        name: "clip2".to_string(),
+                        path: "".to_string(),
+                        start: 5.0,
+                        duration: 5.0,
+                        color: "".to_string(),
+                        filter: None,
+                        transition: None,
+                        scale: None,
+                        rotation: None,
+                        position_x: None,
+                        position_y: None,
+                        opacity: None,
+                        clip_type: None,
+                        text_content: None,
+                        font_size: None,
+                        text_color: None,
+                        volume: None,
+                        fade_in: None,
+                        fade_out: None,
+                        blend_mode: None,
+                    },
+                ],
+                volume: Some(1.0),
+            }],
+        };
+
+        assert_eq!(manager.find_clip_at_time(0, 5.0).unwrap().id, "2");
+        assert_eq!(manager.find_clip_at_time(0, 4.99).unwrap().id, "1");
+        assert_eq!(manager.find_clip_at_time(0, 0.0).unwrap().id, "1");
+        assert!(manager.find_clip_at_time(0, 10.0).is_none());
+    }
+}

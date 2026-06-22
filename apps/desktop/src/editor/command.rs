@@ -1,6 +1,6 @@
-use gpui::Context;
-use crate::editor::EditorCore;
 use crate::editor::timeline::Clip;
+use crate::editor::EditorCore;
+use gpui::Context;
 
 pub trait Command: Send + Sync {
     fn name(&self) -> &'static str;
@@ -34,7 +34,14 @@ pub struct AddClipCommand {
 }
 
 impl AddClipCommand {
-    pub fn new(name: String, path: String, start: f64, duration: f64, color: String, track_index: usize) -> Self {
+    pub fn new(
+        name: String,
+        path: String,
+        start: f64,
+        duration: f64,
+        color: String,
+        track_index: usize,
+    ) -> Self {
         let timestamp = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_millis())
@@ -60,7 +67,10 @@ impl Command for AddClipCommand {
     }
 
     fn execute(&mut self, core: &mut EditorCore, cx: &mut Context<EditorCore>) {
-        println!("AddClipCommand::execute called! Clip name: {}, track: {}", self.name, self.track_index);
+        println!(
+            "AddClipCommand::execute called! Clip name: {}, track: {}",
+            self.name, self.track_index
+        );
         if let Some(clip) = self.clip.take() {
             if self.track_index < core.timeline.tracks.len() {
                 core.timeline.tracks[self.track_index].clips.push(clip);
@@ -119,7 +129,13 @@ pub struct EditClipCommand {
 }
 
 impl EditClipCommand {
-    pub fn new(clip_id: String, old_start: f64, old_duration: f64, new_start: f64, new_duration: f64) -> Self {
+    pub fn new(
+        clip_id: String,
+        old_start: f64,
+        old_duration: f64,
+        new_start: f64,
+        new_duration: f64,
+    ) -> Self {
         Self {
             clip_id,
             old_start,
@@ -188,7 +204,7 @@ impl Command for SplitClipCommand {
                 let original_clip = clips[pos].clone();
                 // Shrink original clip
                 clips[pos].duration = self.playhead - original_clip.start;
-                
+
                 // Create second part
                 let second_part = Clip {
                     id: self.new_clip_id.clone(),
@@ -223,14 +239,14 @@ impl Command for SplitClipCommand {
     fn undo(&mut self, core: &mut EditorCore, cx: &mut Context<EditorCore>) {
         for track in &mut core.timeline.tracks {
             let clips = &mut track.clips;
-            
+
             let mut found = false;
             // Remove second part
             if let Some(pos) = clips.iter().position(|c| c.id == self.new_clip_id) {
                 clips.remove(pos);
                 found = true;
             }
-            
+
             // Restore original clip duration
             if let Some(pos) = clips.iter().position(|c| c.id == self.clip_id) {
                 clips[pos].duration = self.old_duration;
@@ -588,7 +604,9 @@ impl Command for DeleteClipCommand {
     }
 
     fn undo(&mut self, core: &mut EditorCore, cx: &mut Context<EditorCore>) {
-        if let (Some(t_idx), Some(pos), Some(clip)) = (self.track_index, self.deleted_pos, self.deleted_clip.take()) {
+        if let (Some(t_idx), Some(pos), Some(clip)) =
+            (self.track_index, self.deleted_pos, self.deleted_clip.take())
+        {
             core.timeline.tracks[t_idx].clips.insert(pos, clip);
             cx.notify();
         }
@@ -689,7 +707,3 @@ impl Command for AddTextClipCommand {
         }
     }
 }
-
-
-
-

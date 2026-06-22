@@ -1,5 +1,5 @@
-use gpui::{*, InteractiveElement};
 use crate::editor::EditorCore;
+use gpui::{InteractiveElement, *};
 
 pub struct Timeline {
     core: Entity<EditorCore>,
@@ -8,8 +8,16 @@ pub struct Timeline {
 }
 
 impl Timeline {
-    pub fn new(core: Entity<EditorCore>, selected_clip_id: Option<String>, snapped_time: Option<f64>) -> Self {
-        Self { core, selected_clip_id, snapped_time }
+    pub fn new(
+        core: Entity<EditorCore>,
+        selected_clip_id: Option<String>,
+        snapped_time: Option<f64>,
+    ) -> Self {
+        Self {
+            core,
+            selected_clip_id,
+            snapped_time,
+        }
     }
 
     pub fn render(self, cx: &mut Context<crate::ui::Workspace>) -> impl IntoElement {
@@ -34,7 +42,7 @@ impl Timeline {
                 core.load_audio_samples(path, cx);
             }
         });
-        
+
         let audio_waveforms = core.read(cx).audio_waveforms.clone();
 
         let progress_ratio = (current_time / duration).clamp(0.0, 1.0);
@@ -56,13 +64,16 @@ impl Timeline {
                     .flex_col()
                     .items_center()
                     .on_click(move |_, _, cx| {
-                        let _ = core.update(cx, |core: &mut EditorCore, cx: &mut gpui::Context<EditorCore>| {
-                            core.seek(tick_time, cx);
-                        });
+                        let _ = core.update(
+                            cx,
+                            |core: &mut EditorCore, cx: &mut gpui::Context<EditorCore>| {
+                                core.seek(tick_time, cx);
+                            },
+                        );
                     })
                     .child(
                         // Little tick mark line
-                        div().w(px(1.)).h(px(6.)).bg(rgb(0x3f3f46))
+                        div().w(px(1.)).h(px(6.)).bg(rgb(0x3f3f46)),
                     )
                     .child(
                         // Tick label
@@ -70,8 +81,8 @@ impl Timeline {
                             .text_xs()
                             .text_color(rgb(0x8e8e93))
                             .mt_1()
-                            .child(format!("{}s", tick_time as i32))
-                    )
+                            .child(format!("{}s", tick_time as i32)),
+                    ),
             );
         }
 

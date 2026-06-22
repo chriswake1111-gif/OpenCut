@@ -1,0 +1,39 @@
+name: Desktop CI
+
+on:
+  push:
+    branches: [ main, desktop ]
+  pull_request:
+    branches: [ main, desktop ]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Install system dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y ffmpeg libasound2-dev libx11-dev libxrandr-dev libxi-dev libgl1-mesa-dev libxcursor-dev libxinerama-dev libxkbcommon-dev libwayland-dev libx11-xcb-dev libvulkan-dev
+
+    - name: Set up Rust
+      uses: dtolnay/rust-toolchain@stable
+      with:
+        components: rustfmt, clippy
+
+    - name: Rust Cache
+      uses: Swatinem/rust-cache@v2
+
+    - name: Check formatting
+      run: cargo fmt --all -- --check
+
+    - name: Clippy check
+      run: cargo clippy --workspace --all-targets -- -D warnings
+
+    - name: Run tests
+      run: cargo test --workspace

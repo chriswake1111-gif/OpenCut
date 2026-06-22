@@ -1,5 +1,5 @@
-use gpui::{*, InteractiveElement};
-use crate::ui::workspace::{Workspace, MainMenu};
+use crate::ui::workspace::{MainMenu, Workspace};
+use gpui::{InteractiveElement, *};
 
 pub struct Titlebar {
     pub active_menu: Option<MainMenu>,
@@ -29,41 +29,30 @@ impl Titlebar {
                     .items_center()
                     .gap_3()
                     .child(
-                        div()
-                            .size_3()
-                            .rounded_full()
-                            .bg(rgb(0x8b5cf6)) // Violet dot logo
+                        div().size_3().rounded_full().bg(rgb(0x8b5cf6)), // Violet dot logo
                     )
                     .child(
                         div()
                             .text_sm()
                             .font_weight(FontWeight::BOLD)
                             .text_color(rgb(0xffffff))
-                            .child("OpenCut 桌面版")
-                    )
+                            .child("OpenCut 桌面版"),
+                    ),
             )
             .child(
                 div()
                     .flex()
                     .gap_6()
-                    .child(
-                        self.render_header_item("檔案", MainMenu::File, active_menu, cx)
-                    )
-                    .child(
-                        self.render_header_item("編輯", MainMenu::Edit, active_menu, cx)
-                    )
-                    .child(
-                        self.render_header_item("檢視", MainMenu::View, active_menu, cx)
-                    )
-                    .child(
-                        self.render_header_item("說明", MainMenu::Help, active_menu, cx)
-                    )
+                    .child(self.render_header_item("檔案", MainMenu::File, active_menu, cx))
+                    .child(self.render_header_item("編輯", MainMenu::Edit, active_menu, cx))
+                    .child(self.render_header_item("檢視", MainMenu::View, active_menu, cx))
+                    .child(self.render_header_item("說明", MainMenu::Help, active_menu, cx)),
             )
             .child(
                 div()
                     .text_xs()
                     .text_color(rgb(0x8e8e93))
-                    .child("v0.1.0-alpha")
+                    .child("v0.1.0-alpha"),
             )
     }
 
@@ -80,9 +69,17 @@ impl Titlebar {
             .px_2()
             .py_1()
             .rounded(px(4.))
-            .bg(if is_active { rgb(0x242427) } else { rgb(0x161618) })
+            .bg(if is_active {
+                rgb(0x242427)
+            } else {
+                rgb(0x161618)
+            })
             .text_xs()
-            .text_color(if is_active { rgb(0xffffff) } else { rgb(0xc5c5c7) })
+            .text_color(if is_active {
+                rgb(0xffffff)
+            } else {
+                rgb(0xc5c5c7)
+            })
             .hover(|style| style.text_color(rgb(0xffffff)).bg(rgb(0x242427)))
             .cursor_pointer()
             .on_click(cx.listener(move |workspace, _, _window, cx| {

@@ -1,18 +1,43 @@
+#![allow(clippy::let_unit_value)]
+#![allow(clippy::too_many_arguments)]
+#![allow(clippy::collapsible_else_if)]
+#![allow(clippy::needless_borrows_for_generic_args)]
+#![allow(clippy::unnecessary_cast)]
+
 mod editor;
 mod ui;
 
-use gpui::{App, Application, Bounds, WindowBounds, WindowOptions, px, size, prelude::*};
 use editor::EditorCore;
+use gpui::{prelude::*, px, size, App, Application, Bounds, WindowBounds, WindowOptions};
 use ui::Workspace;
 
-gpui::actions!(opencut, [
-    Undo, Redo, Split, OpenProject, SaveProject, ExportVideo,
-    ApplyGrayscaleFilter, ApplyBrightenFilter, ApplyContrastFilter, ApplyNoneFilter,
-    ApplyFadeTransition, ApplyNoneTransition,
-    NewProject, DeleteClip, ImportClip,
-    TogglePlay, SeekForward, SeekBackward, FrameStepForward, FrameStepBackward,
-    ToggleSnapping
-]);
+gpui::actions!(
+    opencut,
+    [
+        Undo,
+        Redo,
+        Split,
+        OpenProject,
+        SaveProject,
+        ExportVideo,
+        ApplyGrayscaleFilter,
+        ApplyBrightenFilter,
+        ApplyContrastFilter,
+        ApplyNoneFilter,
+        ApplyFadeTransition,
+        ApplyNoneTransition,
+        NewProject,
+        DeleteClip,
+        ImportClip,
+        LoadDemo,
+        TogglePlay,
+        SeekForward,
+        SeekBackward,
+        FrameStepForward,
+        FrameStepBackward,
+        ToggleSnapping
+    ]
+);
 
 fn main() {
     Application::new().run(|cx: &mut App| {
@@ -30,6 +55,7 @@ fn main() {
             gpui::KeyBinding::new("delete", crate::DeleteClip, None),
             gpui::KeyBinding::new("backspace", crate::DeleteClip, None),
             gpui::KeyBinding::new("ctrl-i", crate::ImportClip, None),
+            gpui::KeyBinding::new("ctrl-d", crate::LoadDemo, None),
             gpui::KeyBinding::new("space", crate::TogglePlay, None),
             gpui::KeyBinding::new("k", crate::TogglePlay, None),
             gpui::KeyBinding::new("l", crate::SeekForward, None),

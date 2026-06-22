@@ -1,6 +1,5 @@
-use gpui::{*, InteractiveElement};
-use crate::editor::{EditorCore, AddClipCommand};
-
+use crate::editor::{AddClipCommand, EditorCore};
+use gpui::{InteractiveElement, *};
 
 pub struct MediaLibrary {
     core: Entity<EditorCore>,
@@ -35,14 +34,22 @@ impl MediaLibrary {
         let mut asset_elements = Vec::new();
         for asset in unique_assets {
             let lower_name = asset.name.to_lowercase();
-            let is_audio = lower_name.ends_with(".mp3") ||
-                           lower_name.ends_with(".wav") ||
-                           lower_name.ends_with(".aac") ||
-                           lower_name.ends_with(".m4a");
-            let kind = if is_audio { "音訊 (MP3)".to_string() } else { "影片 (H.264)".to_string() };
-            let accent = if is_audio { rgb(0x10b981) } else { rgb(0x8b5cf6) };
+            let is_audio = lower_name.ends_with(".mp3")
+                || lower_name.ends_with(".wav")
+                || lower_name.ends_with(".aac")
+                || lower_name.ends_with(".m4a");
+            let kind = if is_audio {
+                "音訊 (MP3)".to_string()
+            } else {
+                "影片 (H.264)".to_string()
+            };
+            let accent = if is_audio {
+                rgb(0x10b981)
+            } else {
+                rgb(0x8b5cf6)
+            };
             let duration_str = format!("{:.1} 秒", asset.duration);
-            
+
             asset_elements.push(asset_card(asset.name, kind, duration_str, accent));
         }
 
@@ -105,7 +112,7 @@ impl MediaLibrary {
                                         multiple: false,
                                         prompt: Some("選擇要新增的影片或音訊檔案".into()),
                                     });
-                                    
+
                                     cx.spawn(move |cx: &mut gpui::AsyncApp| {
                                         let mut cx = cx.clone();
                                         async move {
@@ -230,7 +237,7 @@ fn asset_card(name: String, kind: String, duration: String, accent: Rgba) -> imp
         .gap_3()
         .child(
             // Colored tag representing media type
-            div().w(px(4.)).h(px(32.)).rounded_full().bg(accent)
+            div().w(px(4.)).h(px(32.)).rounded_full().bg(accent),
         )
         .child(
             div()
@@ -242,19 +249,9 @@ fn asset_card(name: String, kind: String, duration: String, accent: Rgba) -> imp
                         .text_xs()
                         .font_weight(FontWeight::SEMIBOLD)
                         .text_color(rgb(0xffffff))
-                        .child(name)
+                        .child(name),
                 )
-                .child(
-                    div()
-                        .text_xs()
-                        .text_color(rgb(0x8e8e93))
-                        .child(kind)
-                )
+                .child(div().text_xs().text_color(rgb(0x8e8e93)).child(kind)),
         )
-        .child(
-            div()
-                .text_xs()
-                .text_color(rgb(0xc5c5c7))
-                .child(duration)
-        )
+        .child(div().text_xs().text_color(rgb(0xc5c5c7)).child(duration))
 }

@@ -304,12 +304,41 @@ class StorageService {
 		const { mediaMetadataAdapter, mediaAssetsAdapter } =
 			this.getProjectMediaAdapters({ projectId });
 
-		const [file, metadata] = await Promise.all([
+		let [file, metadata] = await Promise.all([
 			mediaAssetsAdapter.get(id),
 			mediaMetadataAdapter.get(id),
 		]);
 
 		if (!file || !metadata) return null;
+
+		if (
+			metadata.name === "stars.mp4" ||
+			metadata.name === "leaves.mp4" ||
+			metadata.name === "test_stars.mp4" ||
+			metadata.name === "test_leaves.mp4" ||
+			metadata.name === "粒子星星" ||
+			metadata.name === "楓紅落葉"
+		) {
+			const isStar = metadata.name.includes("star") || metadata.name.includes("星星");
+			const expectedSize = isStar ? 144015 : 306491;
+			if (file.size !== expectedSize) {
+				console.info(`Migrating legacy mp4v asset "${metadata.name}" to H.264...`);
+				try {
+					const urlPath = isStar ? "/effects/stars.mp4" : "/effects/leaves.mp4";
+					const response = await fetch(urlPath);
+					if (response.ok) {
+						const blob = await response.blob();
+						const newFile = new File([blob], metadata.name, { type: "video/mp4" });
+						await mediaAssetsAdapter.set(id, newFile);
+						file = newFile;
+						metadata.size = newFile.size;
+						await mediaMetadataAdapter.set(id, metadata);
+					}
+				} catch (err) {
+					console.error(`Failed to migrate legacy asset ${metadata.name}:`, err);
+				}
+			}
+		}
 
 		let url: string;
 		if (metadata.type === "image" && (!file.type || file.type === "")) {

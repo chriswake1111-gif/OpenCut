@@ -38,29 +38,28 @@ export function DeleteProjectDialog({
 					<DialogTitle>
 						{singleName ? (
 							<>
-								{"Delete '"}
+								{"刪除「"}
 								<span className="inline-block max-w-[300px] truncate align-bottom">
 									{singleName}
 								</span>
-								{"'?"}
+								{"\u300d？"}
 							</>
 						) : (
-							`Delete ${count} projects?`
+							`刪除 ${count} 個專案？`
 						)}
 					</DialogTitle>
 				</DialogHeader>
 				<DialogBody>
 					<Alert variant="destructive">
-						<AlertTitle>Warning</AlertTitle>
+						<AlertTitle>警告</AlertTitle>
 						<AlertDescription>
-							This will permanently delete{" "}
-							{singleName ? `"${singleName}"` : `${count} projects`} and all
-							associated files.
+							這將永久刪除{" "}
+							{singleName ? `「${singleName}」` : `${count} 個專案`}以及所有相關檔案。
 						</AlertDescription>
 					</Alert>
 					<div className="flex flex-col gap-3">
 						<Label className="text-xs font-semibold text-slate-500">
-							Type "DELETE" to confirm
+							輸入「DELETE」以確認
 						</Label>
 						<Input
 							type="text"
@@ -72,10 +71,10 @@ export function DeleteProjectDialog({
 				</DialogBody>
 				<DialogFooter>
 					<Button variant="outline" onClick={() => onOpenChange(false)}>
-						Cancel
+						取消
 					</Button>
 					<Button variant="destructive" onClick={onConfirm}>
-						Delete project
+						刪除專案
 					</Button>
 				</DialogFooter>
 			</DialogContent>

@@ -154,6 +154,11 @@ export class RendererManager {
 			const exportFps = fps || activeProject.settings.fps;
 			const canvasSize = activeProject.settings.canvasSize;
 
+			const alignedCanvasSize = {
+				width: Math.floor(canvasSize.width / 2) * 2,
+				height: Math.floor(canvasSize.height / 2) * 2,
+			};
+
 			let audioBuffer: AudioBuffer | null = null;
 			if (includeAudio) {
 				onProgress?.({ progress: 0.05 });
@@ -168,13 +173,13 @@ export class RendererManager {
 				tracks,
 				mediaAssets,
 				duration,
-				canvasSize,
+				canvasSize: alignedCanvasSize,
 				background: activeProject.settings.background,
 			});
 
 			const exporter = new SceneExporter({
-				width: canvasSize.width,
-				height: canvasSize.height,
+				width: alignedCanvasSize.width,
+				height: alignedCanvasSize.height,
 				fps: exportFps,
 				format,
 				quality,

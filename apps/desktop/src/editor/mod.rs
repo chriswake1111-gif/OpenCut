@@ -140,7 +140,10 @@ impl EditorCore {
                         .await;
 
                     if let Some(data) = samples {
-                        cache.lock().unwrap().insert(path, std::sync::Arc::new(data));
+                        cache
+                            .lock()
+                            .unwrap()
+                            .insert(path, std::sync::Arc::new(data));
 
                         // Notify UI that audio data is ready
                         let _ = this.update(&mut cx, |_, cx| {
@@ -187,20 +190,34 @@ impl EditorCore {
             move |this: gpui::WeakEntity<Self>, cx: &mut gpui::AsyncApp| {
                 let mut cx = cx.clone();
                 async move {
+                    let mut last_tick = std::time::Instant::now();
                     loop {
                         cx.background_executor().timer(interval).await;
+                        let now = std::time::Instant::now();
+                        let elapsed = now.duration_since(last_tick).as_secs_f64();
+                        last_tick = now;
+
                         let ended: anyhow::Result<bool> =
                             this.update(&mut cx, |this: &mut Self, cx: &mut Context<Self>| {
                                 if !this.playback.is_playing {
                                     return true;
                                 }
 
-                                // Sync current playhead time with atomic audio thread time
-                                let audio_ms = this
-                                    .playback
-                                    .atomic_time_ms
-                                    .load(std::sync::atomic::Ordering::Relaxed);
-                                this.playback.current_time = audio_ms as f64 / 1000.0;
+                                if this.audio_host.is_some() {
+                                    // Sync current playhead time with atomic audio thread time
+                                    let audio_ms = this
+                                        .playback
+                                        .atomic_time_ms
+                                        .load(std::sync::atomic::Ordering::Relaxed);
+                                    this.playback.current_time = audio_ms as f64 / 1000.0;
+                                } else {
+                                    // Fallback clock: increment time manually if audio device is unavailable
+                                    this.playback.current_time += elapsed;
+                                    this.playback.atomic_time_ms.store(
+                                        (this.playback.current_time * 1000.0) as u64,
+                                        std::sync::atomic::Ordering::Relaxed,
+                                    );
+                                }
 
                                 if this.playback.current_time >= this.playback.duration {
                                     this.playback.current_time = this.playback.duration;
@@ -902,10 +919,8 @@ impl EditorCore {
                     for clip in &clips {
                         let has_audio = decoder::has_audio_stream(&clip.path);
                         let is_image = is_image_path(&clip.path);
-                        let (w, h) = if is_image {
-                            (1920, 1080)
-                        } else if let Some(meta) = decoder::probe_video_metadata(&clip.path) {
-                            (meta.0, meta.1)
+                        let (w, h) = if let Some(meta) = decoder::probe_video_metadata(&clip.path) {
+                            ((meta.0 / 2) * 2, (meta.1 / 2) * 2)
                         } else {
                             (1920, 1080)
                         };
@@ -923,10 +938,8 @@ impl EditorCore {
                     for clip in &overlay_clips {
                         let has_audio = decoder::has_audio_stream(&clip.path);
                         let is_image = is_image_path(&clip.path);
-                        let (w, h) = if is_image {
-                            (1920, 1080)
-                        } else if let Some(meta) = decoder::probe_video_metadata(&clip.path) {
-                            (meta.0, meta.1)
+                        let (w, h) = if let Some(meta) = decoder::probe_video_metadata(&clip.path) {
+                            ((meta.0 / 2) * 2, (meta.1 / 2) * 2)
                         } else {
                             (1920, 1080)
                         };

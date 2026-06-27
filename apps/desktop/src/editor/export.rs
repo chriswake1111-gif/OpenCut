@@ -116,16 +116,16 @@ impl FfmpegCommandBuilder {
                     "pad=w={}:h={}:x=(ow-iw)/2+{:.2}:y=(oh-ih)/2+{:.2}:color=black",
                     orig_w, orig_h, pos_x, pos_y
                 ));
+            } else {
+                v_filter_chain.push(format!("scale=w={}:h={}", ex_clip.width, ex_clip.height));
             }
 
-            if !v_filter_chain.is_empty() {
-                filter_complex.push_str(&format!(
-                    "[{}:v]{}[v_proc_{}];",
-                    i,
-                    v_filter_chain.join(","),
-                    i
-                ));
-            }
+            filter_complex.push_str(&format!(
+                "[{}:v]{}[v_proc_{}];",
+                i,
+                v_filter_chain.join(","),
+                i
+            ));
 
             if ex_clip.has_audio {
                 let mut a_filter_chain = Vec::new();
@@ -153,37 +153,40 @@ impl FfmpegCommandBuilder {
         }
 
         // 2. Concat processed Video & Audio inputs (Track 0)
-        for i in 0..plan.clips.len() {
-            let ex_clip = &plan.clips[i];
+        if plan.clips.len() == 1 {
+            let ex_clip = &plan.clips[0];
             let clip = &ex_clip.clip;
 
-            let has_v_proc = clip.filter.is_some()
-                || (clip.transition.is_some() && clip.duration > 1.0)
-                || clip.opacity.unwrap_or(1.0) < 1.0
-                || clip.scale.unwrap_or(1.0) != 1.0
-                || clip.rotation.unwrap_or(0.0) != 0.0
-                || clip.position_x.unwrap_or(0.0) != 0.0
-                || clip.position_y.unwrap_or(0.0) != 0.0;
-
-            let v_label = if has_v_proc {
-                format!("[v_proc_{}]", i)
-            } else {
-                format!("[{}:v]", i)
-            };
-
+            let v_label = "[v_proc_0]".to_string();
             let a_label =
                 if !ex_clip.has_audio || (clip.transition.is_some() && clip.duration > 1.0) {
-                    format!("[a_proc_{}]", i)
+                    "[a_proc_0]".to_string()
                 } else {
-                    format!("[{}:a]", i)
+                    "[0:a]".to_string()
                 };
 
-            filter_complex.push_str(&format!("{}{}", v_label, a_label));
+            filter_complex.push_str(&format!("{}null[v_concat];", v_label));
+            filter_complex.push_str(&format!("{}anull[a_concat];", a_label));
+        } else {
+            for i in 0..plan.clips.len() {
+                let ex_clip = &plan.clips[i];
+                let clip = &ex_clip.clip;
+
+                let v_label = format!("[v_proc_{}]", i);
+                let a_label =
+                    if !ex_clip.has_audio || (clip.transition.is_some() && clip.duration > 1.0) {
+                        format!("[a_proc_{}]", i)
+                    } else {
+                        format!("[{}:a]", i)
+                    };
+
+                filter_complex.push_str(&format!("{}{}", v_label, a_label));
+            }
+            filter_complex.push_str(&format!(
+                "concat=n={}:v=1:a=1[v_concat][a_concat];",
+                plan.clips.len()
+            ));
         }
-        filter_complex.push_str(&format!(
-            "concat=n={}:v=1:a=1[v_concat][a_concat];",
-            plan.clips.len()
-        ));
 
         // Apply main track volume
         filter_complex.push_str(&format!(
@@ -244,23 +247,20 @@ impl FfmpegCommandBuilder {
                     "pad=w={}:h={}:x=(ow-iw)/2+{:.2}:y=(oh-ih)/2+{:.2}:color=black@0",
                     orig_w, orig_h, pos_x, pos_y
                 ));
+            } else {
+                v_filter_chain.push(format!("scale=w={}:h={}", ex_clip.width, ex_clip.height));
             }
 
-            let v_label = if !v_filter_chain.is_empty() {
-                let label = format!("[v_overlay_proc_{}]", j);
-                if !filter_complex.is_empty() && !filter_complex.ends_with(';') {
-                    filter_complex.push(';');
-                }
-                filter_complex.push_str(&format!(
-                    "[{}:v]{}{};",
-                    idx,
-                    v_filter_chain.join(","),
-                    label
-                ));
-                label
-            } else {
-                format!("[{}:v]", idx)
-            };
+            let v_label = format!("[v_overlay_proc_{}]", j);
+            if !filter_complex.is_empty() && !filter_complex.ends_with(';') {
+                filter_complex.push(';');
+            }
+            filter_complex.push_str(&format!(
+                "[{}:v]{}{};",
+                idx,
+                v_filter_chain.join(","),
+                v_label
+            ));
 
             let next_bg = format!("[v_over_{}]", j);
             let start = clip.start;
@@ -329,6 +329,7 @@ impl FfmpegCommandBuilder {
         } else {
             cmd.arg("-map").arg("[a_main_vol]");
         }
+        cmd.arg("-pix_fmt").arg("yuv420p");
         cmd.arg(&plan.export_path);
 
         cmd.stdout(std::process::Stdio::null());
@@ -401,7 +402,8 @@ mod tests {
         let fc_idx = args.iter().position(|a| a == "-filter_complex").unwrap();
         let fc = &args[fc_idx + 1];
         assert!(fc.contains("anullsrc="));
-        assert!(fc.contains("concat="));
+        assert!(fc.contains("null[v_concat]"));
+        assert!(fc.contains("anull[a_concat]"));
     }
 
     #[test]

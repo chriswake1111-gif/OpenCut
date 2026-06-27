@@ -1,6 +1,6 @@
 {
   "name": "opencut",
-  "packageManager": "bun@1.2.18",
+  "packageManager": "pnpm@11.9.0",
   "workspaces": [
     "apps/*",
     "packages/*"

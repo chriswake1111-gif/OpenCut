@@ -19,16 +19,19 @@ impl AudioHost {
     ) -> Option<Self> {
         let host = cpal::default_host();
         let device = host.default_output_device()?;
-        let _config = device.default_output_config().ok()?;
+        let config = device.default_output_config().ok()?;
+        let sample_rate = config.sample_rate();
+        let channels = config.channels();
 
-        // We'll resample decode to 44100Hz stereo
         let stream_config = cpal::StreamConfig {
-            channels: 2,
-            sample_rate: cpal::SampleRate(44100),
+            channels,
+            sample_rate,
             buffer_size: cpal::BufferSize::Default,
         };
 
         let err_fn = |err| println!("an error occurred on audio stream: {}", err);
+        let sample_rate_val = sample_rate.0 as f64;
+        let channels_count = channels as usize;
 
         let stream = device
             .build_output_stream(
@@ -45,7 +48,7 @@ impl AudioHost {
                     let start_time = current_time_ms as f64 / 1000.0;
 
                     let cache_lock = audio_cache.lock().unwrap();
-                    let num_frames = data.len() / 2;
+                    let num_frames = data.len() / channels_count;
 
                     // Reset buffer
                     for sample in data.iter_mut() {
@@ -53,7 +56,7 @@ impl AudioHost {
                     }
 
                     for f_idx in 0..num_frames {
-                        let t_abs = start_time + (f_idx as f64 / 44100.0);
+                        let t_abs = start_time + (f_idx as f64 / sample_rate_val);
                         if t_abs >= duration {
                             break;
                         }
@@ -111,11 +114,18 @@ impl AudioHost {
                             }
                         }
 
-                        data[f_idx * 2] = mixed_l.clamp(-1.0, 1.0);
-                        data[f_idx * 2 + 1] = mixed_r.clamp(-1.0, 1.0);
+                        if channels_count == 1 {
+                            data[f_idx] = ((mixed_l + mixed_r) / 2.0).clamp(-1.0, 1.0);
+                        } else {
+                            data[f_idx * channels_count] = mixed_l.clamp(-1.0, 1.0);
+                            data[f_idx * channels_count + 1] = mixed_r.clamp(-1.0, 1.0);
+                            for c in 2..channels_count {
+                                data[f_idx * channels_count + c] = 0.0;
+                            }
+                        }
                     }
 
-                    let end_time = start_time + (num_frames as f64 / 44100.0);
+                    let end_time = start_time + (num_frames as f64 / sample_rate_val);
                     atomic_time_ms.store((end_time * 1000.0) as u64, Ordering::Relaxed);
                 },
                 err_fn,
@@ -369,8 +379,8 @@ mod tests {
 
     #[gpui::test]
     async fn test_clip_edit_and_split(cx: &mut gpui::TestAppContext) {
-        use crate::editor::EditClipCommand;
         use crate::editor::Clip;
+        use crate::editor::EditClipCommand;
 
         let core = cx.new(|_| EditorCore::new());
         let _ = core.update(cx, |core, _| {

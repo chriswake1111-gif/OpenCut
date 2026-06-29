@@ -110,9 +110,20 @@ function DynamicEffectItem({ effect }: { effect: DynamicVideoEffect }) {
 			const existingAssets = editor.media.getAssets();
 			let targetAsset = existingAssets.find((a) => a.name === effect.fileName);
 
+			const isStar = effect.fileName.includes("star");
+			const expectedSize = isStar ? 144015 : 306491;
+			if (targetAsset && targetAsset.file.size !== expectedSize) {
+				console.info(`Found old mp4v asset size ${targetAsset.file.size}, deleting and re-importing...`);
+				editor.media.removeMediaAsset({
+					projectId: activeProject.metadata.id,
+					id: targetAsset.id,
+				});
+				targetAsset = undefined;
+			}
+
 			if (!targetAsset) {
-				// 2. Fetch the video file as blob
-				const response = await fetch(effect.url);
+				// 2. Fetch the video file as blob with cache-busting
+				const response = await fetch(`${effect.url}?t=${Date.now()}`, { cache: "no-store" });
 				if (!response.ok) {
 					throw new Error(`無法下載特效檔案: ${response.statusText}`);
 				}

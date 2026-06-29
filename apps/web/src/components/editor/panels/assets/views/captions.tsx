@@ -43,9 +43,9 @@ export function Captions() {
 
 	const handleProgress = (progress: TranscriptionProgress) => {
 		if (progress.status === "loading-model") {
-			setProcessingStep(`Loading model ${Math.round(progress.progress)}%`);
+			setProcessingStep(`正在載入語音模型 ${Math.round(progress.progress)}%`);
 		} else if (progress.status === "transcribing") {
-			setProcessingStep("Transcribing...");
+			setProcessingStep("語音辨識中...");
 		}
 	};
 
@@ -53,7 +53,7 @@ export function Captions() {
 		try {
 			setIsProcessing(true);
 			setError(null);
-			setProcessingStep("Extracting audio...");
+			setProcessingStep("正在提取音訊...");
 
 			const audioBlob = await extractTimelineAudio({
 				tracks: editor.timeline.getTracks(),
@@ -61,7 +61,7 @@ export function Captions() {
 				totalDuration: editor.timeline.getTotalDuration(),
 			});
 
-			setProcessingStep("Preparing audio...");
+			setProcessingStep("正在準備音訊...");
 			const { samples } = await decodeAudioToFloat32({ audioBlob });
 
 			const result = await transcriptionService.transcribe({
@@ -70,7 +70,7 @@ export function Captions() {
 				onProgress: handleProgress,
 			});
 
-			setProcessingStep("Generating captions...");
+			setProcessingStep("正在產生字幕...");
 			const captionChunks = buildCaptionChunks({ segments: result.segments });
 
 			const addTrackCommand = new AddTrackCommand("text", 0);
@@ -83,7 +83,7 @@ export function Captions() {
 						},
 						element: {
 							...DEFAULTS.text.element,
-							name: `Caption ${i + 1}`,
+							name: `字幕 ${i + 1}`,
 							content: caption.text,
 							duration: caption.duration,
 							startTime: caption.startTime,
@@ -99,7 +99,7 @@ export function Captions() {
 		} catch (error) {
 			console.error("Transcription failed:", error);
 			setError(
-				error instanceof Error ? error.message : "An unexpected error occurred",
+				error instanceof Error ? error.message : "發生非預期的錯誤",
 			);
 		} finally {
 			setIsProcessing(false);
@@ -122,23 +122,23 @@ export function Captions() {
 
 	return (
 		<PanelView
-			title="Captions"
+			title="字幕"
 			contentClassName="px-0 flex flex-col h-full"
 			ref={containerRef}
 		>
 			<Section showTopBorder={false} showBottomBorder={false} className="flex-1">
 				<SectionContent className="flex flex-col gap-4 h-full pt-1">
 					<SectionFields>
-						<SectionField label="Language">
+						<SectionField label="辨識語言">
 							<Select
 								value={selectedLanguage}
 								onValueChange={(value) => handleLanguageChange({ value })}
 							>
 								<SelectTrigger>
-									<SelectValue placeholder="Select a language" />
+									<SelectValue placeholder="選擇語言" />
 								</SelectTrigger>
 								<SelectContent>
-									<SelectItem value="auto">Auto detect</SelectItem>
+									<SelectItem value="auto">自動偵測</SelectItem>
 									{TRANSCRIPTION_LANGUAGES.map((language) => (
 										<SelectItem key={language.code} value={language.code}>
 											{language.name}
@@ -164,7 +164,7 @@ export function Captions() {
 						disabled={isProcessing}
 					>
 						{isProcessing && <Spinner className="mr-1" />}
-						{isProcessing ? processingStep : "Generate transcript"}
+						{isProcessing ? processingStep : "產生字幕"}
 					</Button>
 				</SectionContent>
 			</Section>

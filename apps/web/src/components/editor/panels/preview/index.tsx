@@ -151,6 +151,10 @@ function PreviewCanvas({
 					})
 					.then(() => {
 						renderingRef.current = false;
+					})
+					.catch((err) => {
+						console.error("Preview render failed:", err);
+						renderingRef.current = false;
 					});
 			}
 		}

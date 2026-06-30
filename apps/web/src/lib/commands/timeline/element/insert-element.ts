@@ -18,6 +18,7 @@ import {
 	getDefaultInsertIndexForTrack,
 	validateElementTrackCompatibility,
 	enforceMainTrackStart,
+	isMainTrack,
 } from "@/lib/timeline/track-utils";
 import type { MediaAsset } from "@/lib/media/types";
 import { ELEMENT_TRACK_MAP, TIMELINE_CONSTANTS } from "@/constants/timeline-constants";
@@ -260,6 +261,16 @@ export class InsertElementCommand extends Command {
 					elementType: element.type,
 					trackType: track.type,
 				})
+			) {
+				return false;
+			}
+
+			// Transparent overlay elements (like screen particle effects) should not go on the main track
+			if (
+				isMainTrack(track) &&
+				"blendMode" in element &&
+				element.blendMode &&
+				element.blendMode !== "normal"
 			) {
 				return false;
 			}

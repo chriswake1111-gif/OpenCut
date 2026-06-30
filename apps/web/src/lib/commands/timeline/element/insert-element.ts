@@ -19,6 +19,7 @@ import {
 	validateElementTrackCompatibility,
 	enforceMainTrackStart,
 	isMainTrack,
+	ensureMainTrack,
 } from "@/lib/timeline/track-utils";
 import type { MediaAsset } from "@/lib/media/types";
 import { ELEMENT_TRACK_MAP, TIMELINE_CONSTANTS } from "@/constants/timeline-constants";
@@ -26,7 +27,12 @@ import { graphicsRegistry, registerDefaultGraphics } from "@/lib/graphics";
 
 type InsertElementPlacement =
 	| { mode: "explicit"; trackId: string }
-	| { mode: "auto"; trackType?: TrackType; insertIndex?: number };
+	| {
+			mode: "auto";
+			trackType?: TrackType;
+			insertIndex?: number;
+			forceNewTrack?: boolean;
+	  };
 
 export interface InsertElementParams {
 	element: CreateTimelineElement;
@@ -254,51 +260,111 @@ export class InsertElementCommand extends Command {
 			return null;
 		}
 
-		const elementEndTime = element.startTime + element.duration;
-		const existingTrack = tracks.find((track) => {
-			if (
-				!canElementGoOnTrack({
-					elementType: element.type,
-					trackType: track.type,
-				})
-			) {
-				return false;
+		// Find the MediaAsset to check if it's a built-in effect
+		const editor = EditorCore.getInstance();
+		const mediaAssets = editor.media.getAssets();
+		const asset = "mediaId" in element ? mediaAssets.find((item) => item.id === element.mediaId) : null;
+		const isBuiltinEffect = !!asset?.builtinEffectId;
+
+		const isGeneralMedia =
+			(element.type === "video" || element.type === "image") &&
+			!isBuiltinEffect;
+
+		if (isGeneralMedia) {
+			let mainTrack = tracks.find((track) => isMainTrack(track));
+			let updatedTracks = [...tracks];
+
+			if (!mainTrack) {
+				updatedTracks = ensureMainTrack({ tracks: updatedTracks });
+				mainTrack = updatedTracks.find((track) => isMainTrack(track));
 			}
 
-			// Transparent overlay elements (like screen particle effects) should not go on the main track
-			if (
-				isMainTrack(track) &&
-				"blendMode" in element &&
-				element.blendMode &&
-				element.blendMode !== "normal"
-			) {
-				return false;
+			if (mainTrack) {
+				const elementEndTime = element.startTime + element.duration;
+				const overlaps = wouldElementOverlap({
+					elements: mainTrack.elements,
+					startTime: element.startTime,
+					endTime: elementEndTime,
+				});
+
+				let finalStartTime = element.startTime;
+				if (overlaps) {
+					const lastElementEnd = mainTrack.elements.reduce(
+						(max, el) => Math.max(max, el.startTime + el.duration),
+						0,
+					);
+					finalStartTime = lastElementEnd;
+				}
+
+				const adjustedElement = this.adjustElementForMainTrack({
+					tracks: updatedTracks,
+					targetTrackId: mainTrack.id,
+					element: { ...element, startTime: finalStartTime } as TimelineElement,
+				});
+
+				updatedTracks = updatedTracks.map((track) =>
+					track.id === mainTrack.id
+						? {
+								...track,
+								elements: [...track.elements, adjustedElement],
+							}
+						: track,
+				) as TimelineTrack[];
+
+				return { updatedTracks, targetTrackId: mainTrack.id };
 			}
+		}
 
-			return !wouldElementOverlap({
-				elements: track.elements,
-				startTime: element.startTime,
-				endTime: elementEndTime,
+		const forceNewTrack =
+			"forceNewTrack" in placement && placement.forceNewTrack === true;
+
+		if (!forceNewTrack) {
+			const elementEndTime = element.startTime + element.duration;
+			const existingTrack = tracks.find((track) => {
+				if (
+					!canElementGoOnTrack({
+						elementType: element.type,
+						trackType: track.type,
+					})
+				) {
+					return false;
+				}
+
+				// Transparent overlay elements (like screen particle effects) should not go on the main track
+				if (
+					isMainTrack(track) &&
+					"blendMode" in element &&
+					element.blendMode &&
+					element.blendMode !== "normal"
+				) {
+					return false;
+				}
+
+				return !wouldElementOverlap({
+					elements: track.elements,
+					startTime: element.startTime,
+					endTime: elementEndTime,
+				});
 			});
-		});
 
-		if (existingTrack) {
-			const adjustedElement = this.adjustElementForMainTrack({
-				tracks,
-				targetTrackId: existingTrack.id,
-				element,
-			});
+			if (existingTrack) {
+				const adjustedElement = this.adjustElementForMainTrack({
+					tracks,
+					targetTrackId: existingTrack.id,
+					element,
+				});
 
-			const updatedTracks = tracks.map((track) =>
-				track.id === existingTrack.id
-					? {
-							...track,
-							elements: [...track.elements, adjustedElement],
-						}
-					: track,
-			) as TimelineTrack[];
+				const updatedTracks = tracks.map((track) =>
+					track.id === existingTrack.id
+						? {
+								...track,
+								elements: [...track.elements, adjustedElement],
+							}
+						: track,
+				) as TimelineTrack[];
 
-			return { updatedTracks, targetTrackId: existingTrack.id };
+				return { updatedTracks, targetTrackId: existingTrack.id };
+			}
 		}
 
 		const newTrackId = generateUUID();

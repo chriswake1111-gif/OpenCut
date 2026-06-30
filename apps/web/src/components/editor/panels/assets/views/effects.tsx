@@ -167,7 +167,12 @@ function DynamicEffectItem({ effect }: { effect: DynamicVideoEffect }) {
 
 			editor.timeline.insertElement({
 				element,
-				placement: { mode: "auto" },
+				placement: {
+					mode: "auto",
+					trackType: "video",
+					insertIndex: 0,
+					forceNewTrack: true,
+				},
 			});
 
 			toast.success(`已成功套用「${effect.name}」`);

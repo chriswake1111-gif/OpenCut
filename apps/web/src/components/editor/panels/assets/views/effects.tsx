@@ -14,6 +14,7 @@ import { Sparkles, Leaf, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { processMediaAssets } from "@/lib/media/processing";
 import { buildElementFromMedia } from "@/lib/timeline/element-utils";
+import type { BlendMode } from "@/lib/rendering";
 import { BUILTIN_EFFECTS_MANIFEST, type BuiltinEffectManifest } from "@/lib/effects/builtin-effects";
 
 interface DynamicVideoEffect extends BuiltinEffectManifest {
@@ -161,7 +162,7 @@ function DynamicEffectItem({ effect }: { effect: DynamicVideoEffect }) {
 
 			// Force defaultBlendMode to blend mode from manifest to make it transparent overlay
 			if (element.type === "video") {
-				element.blendMode = effect.defaultBlendMode as any;
+				element.blendMode = effect.defaultBlendMode as BlendMode;
 			}
 
 			editor.timeline.insertElement({

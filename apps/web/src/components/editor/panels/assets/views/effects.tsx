@@ -14,34 +14,28 @@ import { Sparkles, Leaf, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { processMediaAssets } from "@/lib/media/processing";
 import { buildElementFromMedia } from "@/lib/timeline/element-utils";
+import { BUILTIN_EFFECTS_MANIFEST, type BuiltinEffectManifest } from "@/lib/effects/builtin-effects";
 
-interface DynamicVideoEffect {
-	id: string;
-	name: string;
-	fileName: string;
-	url: string;
+interface DynamicVideoEffect extends BuiltinEffectManifest {
 	icon: "sparkles" | "leaf";
 	gradient: string;
 }
 
-const DYNAMIC_VIDEO_EFFECTS: DynamicVideoEffect[] = [
-	{
-		id: "stars",
-		name: "粒子星星",
-		fileName: "stars.mp4",
-		url: "/effects/stars.mp4",
+const EFFECT_UI_METADATA: Record<string, { icon: "sparkles" | "leaf"; gradient: string }> = {
+	stars: {
 		icon: "sparkles",
 		gradient: "from-blue-950 via-indigo-900 to-slate-900 text-indigo-300",
 	},
-	{
-		id: "leaves",
-		name: "楓紅落葉",
-		fileName: "leaves.mp4",
-		url: "/effects/leaves.mp4",
+	leaves: {
 		icon: "leaf",
 		gradient: "from-amber-950 via-red-950 to-stone-900 text-red-400",
 	},
-];
+};
+
+const DYNAMIC_VIDEO_EFFECTS: DynamicVideoEffect[] = BUILTIN_EFFECTS_MANIFEST.map((effect) => ({
+	...effect,
+	...EFFECT_UI_METADATA[effect.id],
+}));
 
 export function EffectsView() {
 	const effects = effectsRegistry.getAll();
@@ -106,14 +100,17 @@ function DynamicEffectItem({ effect }: { effect: DynamicVideoEffect }) {
 
 		setIsLoading(true);
 		try {
-			// 1. Check if the asset has already been imported
+			// 1. Check if the asset has already been imported (by builtinEffectId or filename)
 			const existingAssets = editor.media.getAssets();
-			let targetAsset = existingAssets.find((a) => a.name === effect.fileName);
+			let targetAsset = existingAssets.find(
+				(a) => a.builtinEffectId === effect.id || a.name === effect.fileName
+			);
 
-			const isStar = effect.fileName.includes("star");
-			const expectedSize = isStar ? 144015 : 306491;
-			if (targetAsset && targetAsset.file.size !== expectedSize) {
-				console.info(`Found old mp4v asset size ${targetAsset.file.size}, deleting and re-importing...`);
+			// If asset exists but has a different version or is legacy, delete it to re-import the new version
+			if (targetAsset && targetAsset.builtinEffectVersion !== effect.version) {
+				console.info(
+					`Found legacy/different version "${targetAsset.builtinEffectVersion ?? "legacy"}" of builtin asset "${targetAsset.name}", deleting and re-importing...`
+				);
 				editor.media.removeMediaAsset({
 					projectId: activeProject.metadata.id,
 					id: targetAsset.id,
@@ -137,10 +134,14 @@ function DynamicEffectItem({ effect }: { effect: DynamicVideoEffect }) {
 				}
 
 				const asset = processed[0];
-				// 4. Register in project media DB
+				// 4. Register in project media DB with builtin info
 				const addedAsset = await editor.media.addMediaAsset({
 					projectId: activeProject.metadata.id,
-					asset,
+					asset: {
+						...asset,
+						builtinEffectId: effect.id,
+						builtinEffectVersion: effect.version,
+					},
 				});
 				if (!addedAsset) {
 					throw new Error("儲存特效素材失敗");
@@ -158,9 +159,9 @@ function DynamicEffectItem({ effect }: { effect: DynamicVideoEffect }) {
 				startTime: editor.playback.getCurrentTime(),
 			});
 
-			// Force blendMode to screen to make it transparent overlay
+			// Force defaultBlendMode to blend mode from manifest to make it transparent overlay
 			if (element.type === "video") {
-				element.blendMode = "screen";
+				element.blendMode = effect.defaultBlendMode as any;
 			}
 
 			editor.timeline.insertElement({

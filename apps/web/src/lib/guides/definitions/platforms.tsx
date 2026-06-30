@@ -1,6 +1,6 @@
-import Image from "next/image";
 import type { GuideDefinition } from "@/lib/guides/types";
 import { TikTokLayout } from "./tiktok-layout";
+import { Youtube, Instagram, Video } from "lucide-react";
 
 function PlatformLogo({
 	domain,
@@ -9,17 +9,13 @@ function PlatformLogo({
 	domain: string;
 	className?: string;
 }) {
-	return (
-		<Image
-			src={`https://cdn.brandfetch.io/${domain}/w/64/h/64`}
-			alt=""
-			width={18}
-			height={18}
-			className={className}
-			draggable={false}
-			unoptimized
-		/>
-	);
+	if (domain === "youtube.com") {
+		return <Youtube className={className} />;
+	}
+	if (domain === "instagram.com") {
+		return <Instagram className={className} />;
+	}
+	return <Video className={className} />;
 }
 
 function PlatformGuidePreview({ domain }: { domain: string }) {

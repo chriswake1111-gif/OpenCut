@@ -22,6 +22,8 @@ import {
 	runStorageMigrations,
 } from "@/services/storage/migrations";
 import type { Bookmark, TimelineTrack, TScene } from "@/lib/timeline";
+import { BUILTIN_EFFECTS_MANIFEST } from "@/lib/effects/builtin-effects";
+import type { StorageAdapter } from "./types";
 
 function normalizeBookmarks({ raw }: { raw: unknown }): Bookmark[] {
 	if (!Array.isArray(raw)) return [];
@@ -272,6 +274,8 @@ class StorageService {
 			duration: mediaAsset.duration,
 			thumbnailUrl: mediaAsset.thumbnailUrl,
 			ephemeral: mediaAsset.ephemeral,
+			builtinEffectId: mediaAsset.builtinEffectId,
+			builtinEffectVersion: mediaAsset.builtinEffectVersion,
 		};
 
 		try {
@@ -294,6 +298,67 @@ class StorageService {
 		}
 	}
 
+	private async migrateBuiltinAsset({
+		id,
+		file,
+		metadata,
+		mediaAssetsAdapter,
+		mediaMetadataAdapter,
+	}: {
+		id: string;
+		file: File;
+		metadata: MediaAssetData;
+		mediaAssetsAdapter: StorageAdapter<File>;
+		mediaMetadataAdapter: StorageAdapter<MediaAssetData>;
+	}): Promise<File> {
+		// Identify by builtinEffectId first, fall back to name-based mapping for legacy assets
+		let builtinId = metadata.builtinEffectId;
+		if (!builtinId) {
+			if (
+				metadata.name === "stars.mp4" ||
+				metadata.name === "test_stars.mp4" ||
+				metadata.name === "粒子星星"
+			) {
+				builtinId = "stars";
+			} else if (
+				metadata.name === "leaves.mp4" ||
+				metadata.name === "test_leaves.mp4" ||
+				metadata.name === "楓紅落葉"
+			) {
+				builtinId = "leaves";
+			}
+		}
+
+		if (!builtinId) return file;
+
+		// Resolve from manifest
+		const manifest = BUILTIN_EFFECTS_MANIFEST.find((m) => m.id === builtinId);
+		if (!manifest) return file;
+
+		// Check if we need to migrate (if no version, it is legacy and version won't match "h264-v2")
+		if (metadata.builtinEffectVersion !== manifest.version) {
+			console.info(`Migrating legacy/different version of builtin asset "${metadata.name}" to version "${manifest.version}"...`);
+			try {
+				const response = await fetch(`${manifest.url}?t=${Date.now()}`, { cache: "no-store" });
+				if (response.ok) {
+					const blob = await response.blob();
+					const newFile = new File([blob], metadata.name, { type: "video/mp4" });
+					await mediaAssetsAdapter.set(id, newFile);
+					
+					metadata.size = newFile.size;
+					metadata.builtinEffectId = builtinId;
+					metadata.builtinEffectVersion = manifest.version;
+					await mediaMetadataAdapter.set(id, metadata);
+					return newFile;
+				}
+			} catch (err) {
+				console.error(`Failed to migrate legacy asset ${metadata.name}:`, err);
+			}
+		}
+
+		return file;
+	}
+
 	async loadMediaAsset({
 		projectId,
 		id,
@@ -311,34 +376,14 @@ class StorageService {
 
 		if (!file || !metadata) return null;
 
-		if (
-			metadata.name === "stars.mp4" ||
-			metadata.name === "leaves.mp4" ||
-			metadata.name === "test_stars.mp4" ||
-			metadata.name === "test_leaves.mp4" ||
-			metadata.name === "粒子星星" ||
-			metadata.name === "楓紅落葉"
-		) {
-			const isStar = metadata.name.includes("star") || metadata.name.includes("星星");
-			const expectedSize = isStar ? 144015 : 306491;
-			if (file.size !== expectedSize) {
-				console.info(`Migrating legacy mp4v asset "${metadata.name}" to H.264...`);
-				try {
-					const urlPath = isStar ? "/effects/stars.mp4" : "/effects/leaves.mp4";
-					const response = await fetch(urlPath);
-					if (response.ok) {
-						const blob = await response.blob();
-						const newFile = new File([blob], metadata.name, { type: "video/mp4" });
-						await mediaAssetsAdapter.set(id, newFile);
-						file = newFile;
-						metadata.size = newFile.size;
-						await mediaMetadataAdapter.set(id, metadata);
-					}
-				} catch (err) {
-					console.error(`Failed to migrate legacy asset ${metadata.name}:`, err);
-				}
-			}
-		}
+		// Run builtin effect migration helper
+		file = await this.migrateBuiltinAsset({
+			id,
+			file,
+			metadata,
+			mediaAssetsAdapter,
+			mediaMetadataAdapter,
+		});
 
 		let url: string;
 		if (metadata.type === "image" && (!file.type || file.type === "")) {
@@ -368,6 +413,8 @@ class StorageService {
 			duration: metadata.duration,
 			thumbnailUrl: metadata.thumbnailUrl,
 			ephemeral: metadata.ephemeral,
+			builtinEffectId: metadata.builtinEffectId,
+			builtinEffectVersion: metadata.builtinEffectVersion,
 		};
 	}
 

@@ -68,6 +68,18 @@ def create_default_sprite(sprite_type="leaf"):
                 if alpha > 0:
                     # Soft white cloud (B=255, G=255, R=255)
                     img[y, x] = [255, 255, 255, int(alpha * 0.85)]
+    elif sprite_type == "rain":
+        # Draw a vertical rain drop / streak
+        mask = np.zeros((128, 128), dtype=np.uint8)
+        cv2.line(mask, (64, 10), (64, 118), 255, 3)
+        # Gaussian blur for soft rain streak
+        blurred = cv2.GaussianBlur(mask, (5, 5), 0)
+        for y in range(128):
+            for x in range(128):
+                alpha = blurred[y, x]
+                if alpha > 0:
+                    # Soft whitish-blue rain streak (B=235, G=215, R=180)
+                    img[y, x] = [235, 215, 180, int(alpha * 0.6)]
     else:
         # Default circle
         cv2.circle(img, center, 32, (255, 255, 255, 255), -1)
@@ -77,7 +89,7 @@ def create_default_sprite(sprite_type="leaf"):
 def main():
     parser = argparse.ArgumentParser(description="OpenCut Universal Sprite Particle Effect Generator")
     parser.add_argument("--sprite", type=str, default="", help="Path to custom transparent PNG sprite image.")
-    parser.add_argument("--sprite-type", type=str, default="leaf", choices=["leaf", "star", "circle", "cloud"], help="Default sprite type if no custom path is given.")
+    parser.add_argument("--sprite-type", type=str, default="leaf", choices=["leaf", "star", "circle", "cloud", "rain"], help="Default sprite type if no custom path is given.")
     parser.add_argument("--output", type=str, default="output_effect.mp4", help="Path to save the output MP4 video.")
     parser.add_argument("--duration", type=float, default=10.0, help="Video duration in seconds.")
     parser.add_argument("--fps", type=int, default=30, help="Frames per second.")
@@ -176,10 +188,17 @@ def main():
             vy = random.uniform(1.0, 2.0) if args.gravity >= 0 else random.uniform(-2.0, -1.0)
         
         # Rotations and wobbling
-        rot = random.uniform(0, 360)
-        rot_speed = random.uniform(-args.rot_speed, args.rot_speed)
-        wobble_speed = random.uniform(0.05, 0.15)
-        wobble_amp = random.uniform(0.1, args.wobble)
+        if args.sprite_type == "rain":
+            # Align rain streaks to the fall velocity direction
+            rot = math.degrees(math.atan2(vy, vx)) - 90
+            rot_speed = 0.0
+            wobble_speed = 0.0
+            wobble_amp = 0.0
+        else:
+            rot = random.uniform(0, 360)
+            rot_speed = random.uniform(-args.rot_speed, args.rot_speed)
+            wobble_speed = random.uniform(0.05, 0.15)
+            wobble_amp = random.uniform(0.1, args.wobble)
         
         p = Particle(x, y, vx, vy, lifetime, scale, rot, rot_speed, wobble_speed, wobble_amp)
         # If pre-populated, set a random starting age to distribute states

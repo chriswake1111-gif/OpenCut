@@ -24,4 +24,12 @@ export const BUILTIN_EFFECTS_MANIFEST: BuiltinEffectManifest[] = [
 		version: "h264-v2",
 		defaultBlendMode: "screen",
 	},
+	{
+		id: "clouds",
+		name: "天空浮雲",
+		fileName: "clouds.mp4",
+		url: "/effects/clouds.mp4",
+		version: "h264-v2",
+		defaultBlendMode: "screen",
+	},
 ];

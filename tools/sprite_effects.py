@@ -51,6 +51,23 @@ def create_default_sprite(sprite_type="leaf"):
         
         # Color fill: Autumn Maple Red
         img[mask > 0] = [34, 76, 215, 240] # BGR format: R=215, G=76, B=34
+    elif sprite_type == "cloud":
+        # Draw a fluffy cloud using overlapping circles and soft Gaussian blur
+        mask = np.zeros((128, 128), dtype=np.uint8)
+        cv2.circle(mask, (64, 60), 25, 255, -1)
+        cv2.circle(mask, (44, 68), 18, 255, -1)
+        cv2.circle(mask, (84, 68), 20, 255, -1)
+        cv2.circle(mask, (54, 76), 14, 255, -1)
+        cv2.circle(mask, (74, 76), 14, 255, -1)
+        
+        # Gaussian Blur to make the cloud soft and fluffy
+        blurred = cv2.GaussianBlur(mask, (15, 15), 0)
+        for y in range(128):
+            for x in range(128):
+                alpha = blurred[y, x]
+                if alpha > 0:
+                    # Soft white cloud (B=255, G=255, R=255)
+                    img[y, x] = [255, 255, 255, int(alpha * 0.85)]
     else:
         # Default circle
         cv2.circle(img, center, 32, (255, 255, 255, 255), -1)
@@ -60,7 +77,7 @@ def create_default_sprite(sprite_type="leaf"):
 def main():
     parser = argparse.ArgumentParser(description="OpenCut Universal Sprite Particle Effect Generator")
     parser.add_argument("--sprite", type=str, default="", help="Path to custom transparent PNG sprite image.")
-    parser.add_argument("--sprite-type", type=str, default="leaf", choices=["leaf", "star", "circle"], help="Default sprite type if no custom path is given.")
+    parser.add_argument("--sprite-type", type=str, default="leaf", choices=["leaf", "star", "circle", "cloud"], help="Default sprite type if no custom path is given.")
     parser.add_argument("--output", type=str, default="output_effect.mp4", help="Path to save the output MP4 video.")
     parser.add_argument("--duration", type=float, default=10.0, help="Video duration in seconds.")
     parser.add_argument("--fps", type=int, default=30, help="Frames per second.")

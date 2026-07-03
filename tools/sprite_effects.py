@@ -89,6 +89,8 @@ def main():
     parser.add_argument("--gravity", type=float, default=3.0, help="Y-axis gravity force (positive falls, negative floats up).")
     parser.add_argument("--wind", type=float, default=1.0, help="X-axis wind force.")
     parser.add_argument("--wobble", type=float, default=2.0, help="Amplitude of horizontal swaying/wobbling.")
+    parser.add_argument("--y-min", type=float, default=0.0, help="Minimum Y spawn ratio (0.0 to 1.0).")
+    parser.add_argument("--y-max", type=float, default=1.0, help="Maximum Y spawn ratio (0.0 to 1.0).")
     parser.add_argument("--scale-min", type=float, default=0.2, help="Minimum scale factor for particles.")
     parser.add_argument("--scale-max", type=float, default=0.6, help="Maximum scale factor for particles.")
     parser.add_argument("--rot-speed", type=float, default=3.0, help="Maximum rotation speed in degrees per frame.")
@@ -133,24 +135,45 @@ def main():
     def spawn_particle(full_screen=False):
         # Scale and lifecycle
         scale = random.uniform(args.scale_min, args.scale_max)
-        lifetime = int(random.uniform(3.0, 7.0) * args.fps)
+        lifetime = int(random.uniform(5.0, 9.0) * args.fps) # longer lifetime for slow drifting particles
         
         # Position spawning
         # Spawning margin to hide popping edges
         margin = int(max(sw, sh) * scale)
+        
+        y_min_val = args.y_min * args.height
+        y_max_val = args.y_max * args.height
+        
         if full_screen:
             x = random.uniform(-margin, args.width + margin)
-            y = random.uniform(-margin, args.height + margin)
+            y = random.uniform(y_min_val - margin, y_max_val + margin)
         else:
-            x = random.uniform(-margin, args.width + margin)
-            if args.gravity >= 0:
-                y = float(-margin) # Spawn at the top
+            # If gravity is very small, we do horizontal movement and spawn at left/right edges
+            if abs(args.gravity) < 0.5:
+                spawn_left = random.choice([True, False]) if args.wind == 0 else (args.wind >= 0)
+                if spawn_left:
+                    x = float(-margin) # enters from left
+                else:
+                    x = float(args.width + margin) # enters from right
+                y = random.uniform(y_min_val - margin, y_max_val + margin)
             else:
-                y = float(args.height + margin) # Spawn at the bottom
+                x = random.uniform(-margin, args.width + margin)
+                if args.gravity >= 0:
+                    y = float(-margin) # Spawn at the top
+                else:
+                    y = float(args.height + margin) # Spawn at the bottom
                 
         # Velocities
-        vx = random.uniform(-1.0, 1.0)
-        vy = random.uniform(1.0, 2.0) if args.gravity >= 0 else random.uniform(-2.0, -1.0)
+        if abs(args.gravity) < 0.5:
+            # Horizontal motion
+            if args.wind == 0:
+                vx = random.uniform(0.3, 0.8) if (x == -margin) else random.uniform(-0.8, -0.3)
+            else:
+                vx = random.uniform(0.3, 0.8) if args.wind >= 0 else random.uniform(-0.8, -0.3)
+            vy = random.uniform(-0.1, 0.1) # extremely small vertical drift
+        else:
+            vx = random.uniform(-1.0, 1.0)
+            vy = random.uniform(1.0, 2.0) if args.gravity >= 0 else random.uniform(-2.0, -1.0)
         
         # Rotations and wobbling
         rot = random.uniform(0, 360)
